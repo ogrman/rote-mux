@@ -1,0 +1,18 @@
+default: run
+services:
+  database:
+    command: bash -c 'echo "Database running"; tail -f /dev/null'
+    display: []
+  frontend:
+    cwd: frontend
+    command: scripts/frontend.sh
+    display: [stderr]
+  backend:
+    cwd: backend
+    command: scripts/backend.sh
+    require: [database, setup]
+    # stdout and stderr are displayed by default
+  setup:
+    command: scripts/setup.sh
+  run:
+    require: [backend, frontend]
