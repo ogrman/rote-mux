@@ -1,8 +1,8 @@
 use clap::Parser;
-use std::path::{Path, PathBuf};
-use std::fs;
 use rote::config::Config;
 use rote::execute_service;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]

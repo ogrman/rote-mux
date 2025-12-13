@@ -10,7 +10,9 @@ pub struct Config {
 #[derive(Debug, Deserialize)]
 pub struct Service {
     #[serde(default)]
-    pub command: Option<String>,
+    pub run: Option<String>,
+    #[serde(default)]
+    pub start: Option<String>,
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
@@ -38,35 +40,53 @@ mod tests {
         let config = load_config();
         assert_eq!(config.default, "run");
         let map = &config.services;
-        assert_eq!(map["database"].command.as_deref(), Some("docker-compose up database --detach --wait"));
+        assert_eq!(
+            map["database"].start.as_deref(),
+            Some("bash -c 'echo \"Database running\"; tail -f /dev/null'")
+        );
+        assert_eq!(map["database"].run, None);
         assert_eq!(map["database"].display, Some(vec![]));
 
         assert_eq!(map["frontend"].cwd.as_deref(), Some("frontend"));
-        assert_eq!(map["frontend"].command.as_deref(), Some("scripts/frontend.sh"));
+        assert_eq!(
+            map["frontend"].start.as_deref(),
+            Some("scripts/frontend.sh")
+        );
+        assert_eq!(map["frontend"].run, None);
         assert_eq!(map["frontend"].display, Some(vec!["stderr".to_string()]));
 
         assert_eq!(map["backend"].cwd.as_deref(), Some("backend"));
-        assert_eq!(map["backend"].command.as_deref(), Some("scripts/backend.sh"));
-        assert_eq!(map["backend"].require, Some(vec!["database".to_string(), "setup".to_string()]));
+        assert_eq!(map["backend"].start.as_deref(), Some("scripts/backend.sh"));
+        assert_eq!(map["backend"].run, None);
+        assert_eq!(
+            map["backend"].require,
+            Some(vec!["database".to_string(), "setup".to_string()])
+        );
         assert_eq!(map["backend"].display, None);
 
-        assert_eq!(map["setup"].command.as_deref(), Some("scripts/setup.sh"));
+        assert_eq!(map["setup"].run.as_deref(), Some("scripts/setup.sh"));
+        assert_eq!(map["setup"].start, None);
 
-        assert!(map["run"].command.is_none());
-        assert_eq!(map["run"].require, Some(vec!["backend".to_string(), "frontend".to_string()]));
+        assert!(map["run"].run.is_none());
+        assert!(map["run"].start.is_none());
+        assert_eq!(
+            map["run"].require,
+            Some(vec!["backend".to_string(), "frontend".to_string()])
+        );
     }
 
     #[test]
     fn test_missing_optional_fields() {
         let yaml = r#"
-default: service
-services:
-  service:
-    command: echo 'hi'
-"#;
+    default: service
+    services:
+      service:
+        run: echo 'hi'
+    "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
-        assert_eq!(service.command.as_deref(), Some("echo 'hi'"));
+        assert_eq!(service.run.as_deref(), Some("echo 'hi'"));
+        assert_eq!(service.start, None);
         assert_eq!(service.cwd, None);
         assert_eq!(service.display, None);
         assert_eq!(service.require, None);
@@ -75,11 +95,11 @@ services:
     #[test]
     fn test_default_field_true() {
         let yaml = r#"
-default: service
-services:
-  service:
-    command: echo 'hi'
-"#;
+    default: service
+    services:
+      service:
+        run: echo 'hi'
+    "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.default, "service");
     }
@@ -94,29 +114,32 @@ services:
     #[test]
     fn test_extra_fields_are_ignored() {
         let yaml = r#"
-default: service
-services:
-  service:
-    command: echo 'hi'
-    extra: value
-"#;
+    default: service
+    services:
+      service:
+        run: echo 'hi'
+        extra: value
+    "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
-        assert_eq!(service.command.as_deref(), Some("echo 'hi'"));
+        assert_eq!(service.run.as_deref(), Some("echo 'hi'"));
+        assert_eq!(service.start, None);
     }
 
     #[test]
     fn test_display_and_require_empty() {
         let yaml = r#"
-default: service
-services:
-  service:
-    command: echo 'hi'
-    display: []
-    require: []
-"#;
+    default: service
+    services:
+      service:
+        run: echo 'hi'
+        display: []
+        require: []
+    "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
+        assert_eq!(service.run.as_deref(), Some("echo 'hi'"));
+        assert_eq!(service.start, None);
         assert_eq!(service.display, Some(vec![]));
         assert_eq!(service.require, Some(vec![]));
     }
