@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::{borrow::Cow, collections::HashMap};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -9,18 +9,33 @@ pub struct Config {
 
 #[derive(Debug, Deserialize)]
 pub struct Service {
-    #[serde(default)]
-    pub run: Option<String>,
-    #[serde(default)]
-    pub start: Option<String>,
+    #[serde(default, flatten)]
+    pub action: Option<ServiceAction>,
     #[serde(default)]
     pub cwd: Option<String>,
     #[serde(default)]
     pub display: Option<Vec<String>>,
     #[serde(default)]
-    pub require: Option<Vec<String>>,
-    #[serde(default)]
-    pub default: bool,
+    pub require: Vec<String>,
+}
+
+/// Represents the action to be performed for a service.
+///
+/// This can either be a `run` action or a `start` action, each containing
+/// a command to be executed. `run` is used for something that should run
+/// to completion before the service is considered ready, while `start` is used
+/// for long-running services. These are mutually exclusive.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum ServiceAction {
+    Run {
+        #[serde(rename = "run")]
+        command: Cow<'static, str>,
+    },
+    Start {
+        #[serde(rename = "start")]
+        command: Cow<'static, str>,
+    },
 }
 
 #[cfg(test)]
@@ -36,42 +51,80 @@ mod tests {
     }
 
     #[test]
+    fn test_deserialize_action() {
+        {
+            let yaml_run = r#"
+                run: echo 'Hello, World!'
+                "#;
+            let action: ServiceAction = serde_yaml::from_str(yaml_run).unwrap();
+            assert_eq!(
+                action,
+                ServiceAction::Run {
+                    command: Cow::Borrowed("echo 'Hello, World!'"),
+                },
+            );
+        }
+
+        {
+            let yaml_start = r#"
+                start: ./start_service.sh
+                "#;
+            let action: ServiceAction = serde_yaml::from_str(yaml_start).unwrap();
+            assert_eq!(
+                action,
+                ServiceAction::Start {
+                    command: Cow::Borrowed("./start_service.sh"),
+                }
+            );
+        }
+    }
+
+    #[test]
     fn test_deserialize_example_yaml() {
         let config = load_config();
         assert_eq!(config.default, "run");
         let map = &config.services;
         assert_eq!(
-            map["database"].start.as_deref(),
-            Some("bash -c 'echo \"Database running\"; tail -f /dev/null'")
+            map["database"].action,
+            Some(ServiceAction::Start {
+                command: Cow::Borrowed("bash -c 'echo \"Database running\"; tail -f /dev/null'"),
+            })
         );
-        assert_eq!(map["database"].run, None);
         assert_eq!(map["database"].display, Some(vec![]));
 
         assert_eq!(map["frontend"].cwd.as_deref(), Some("frontend"));
         assert_eq!(
-            map["frontend"].start.as_deref(),
-            Some("scripts/frontend.sh")
+            map["frontend"].action,
+            Some(ServiceAction::Start {
+                command: Cow::Borrowed("scripts/frontend.sh"),
+            }),
         );
-        assert_eq!(map["frontend"].run, None);
         assert_eq!(map["frontend"].display, Some(vec!["stderr".to_string()]));
 
         assert_eq!(map["backend"].cwd.as_deref(), Some("backend"));
-        assert_eq!(map["backend"].start.as_deref(), Some("scripts/backend.sh"));
-        assert_eq!(map["backend"].run, None);
+        assert_eq!(
+            map["backend"].action,
+            Some(ServiceAction::Start {
+                command: Cow::Borrowed("scripts/backend.sh"),
+            }),
+        );
         assert_eq!(
             map["backend"].require,
-            Some(vec!["database".to_string(), "setup".to_string()])
+            vec!["database".to_string(), "setup".to_string()]
         );
         assert_eq!(map["backend"].display, None);
 
-        assert_eq!(map["setup"].run.as_deref(), Some("scripts/setup.sh"));
-        assert_eq!(map["setup"].start, None);
+        assert_eq!(
+            map["setup"].action,
+            Some(ServiceAction::Run {
+                command: Cow::Borrowed("scripts/setup.sh"),
+            })
+        );
 
-        assert!(map["run"].run.is_none());
-        assert!(map["run"].start.is_none());
+        assert!(map["run"].action.is_none());
         assert_eq!(
             map["run"].require,
-            Some(vec!["backend".to_string(), "frontend".to_string()])
+            vec!["backend".to_string(), "frontend".to_string()]
         );
     }
 
@@ -85,11 +138,15 @@ mod tests {
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
-        assert_eq!(service.run.as_deref(), Some("echo 'hi'"));
-        assert_eq!(service.start, None);
+        assert_eq!(
+            service.action,
+            Some(ServiceAction::Run {
+                command: Cow::Borrowed("echo 'hi'"),
+            })
+        );
         assert_eq!(service.cwd, None);
         assert_eq!(service.display, None);
-        assert_eq!(service.require, None);
+        assert_eq!(service.require, Vec::<String>::new());
     }
 
     #[test]
@@ -122,8 +179,12 @@ mod tests {
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
-        assert_eq!(service.run.as_deref(), Some("echo 'hi'"));
-        assert_eq!(service.start, None);
+        assert_eq!(
+            service.action,
+            Some(ServiceAction::Run {
+                command: Cow::Borrowed("echo 'hi'"),
+            })
+        );
     }
 
     #[test]
@@ -138,9 +199,13 @@ mod tests {
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
-        assert_eq!(service.run.as_deref(), Some("echo 'hi'"));
-        assert_eq!(service.start, None);
+        assert_eq!(
+            service.action,
+            Some(ServiceAction::Run {
+                command: Cow::Borrowed("echo 'hi'"),
+            })
+        );
         assert_eq!(service.display, Some(vec![]));
-        assert_eq!(service.require, Some(vec![]));
+        assert_eq!(service.require, Vec::<String>::new());
     }
 }
