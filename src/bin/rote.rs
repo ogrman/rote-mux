@@ -1,36 +1,40 @@
+use anyhow::Context as _;
 use clap::Parser;
-use rote::config::Config;
-use rote::execute_service;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+use rote::{Config, Process};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
+    /// The path to the configuration file. If omitted will look for `rote.yaml`
+    /// in the current directory.
     #[arg(short, long, value_name = "FILE")]
-    config: String,
+    config: Option<String>,
+    /// The services to run. If omitted, the default service from the config
+    /// file will be run. If the default service is not specified in the config,
+    /// no services will be run.
     #[arg(value_name = "SERVICE", required = false)]
     services: Vec<String>,
 }
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let config_path = PathBuf::from(&args.config);
-    let yaml_dir = config_path.parent().unwrap_or_else(|| Path::new("."));
-    let yaml_str = fs::read_to_string(&config_path).expect("Failed to read config file");
-    let config: Config = serde_yaml::from_str(&yaml_str).expect("Failed to parse config");
 
-    let services_to_run = if args.services.is_empty() {
-        vec![config.default.clone()]
+    let config_path = if let Some(config) = args.config {
+        PathBuf::from(config)
     } else {
-        args.services.clone()
+        PathBuf::from("rote.yaml")
     };
 
-    for name in services_to_run {
-        if let Some(service) = config.services.get(&name) {
-            execute_service(service, yaml_dir);
-        } else {
-            eprintln!("Service '{}' not found in config", name);
-        }
-    }
+    let Some(yaml_dir) = config_path.parent() else {
+        anyhow::bail!("Failed to determine config file directory");
+    };
+
+    let yaml_str = fs::read_to_string(&config_path).context("Reading the config file")?;
+
+    let config: Config = serde_yaml::from_str(&yaml_str).context("Parsing the config file")?;
+
+    Ok(())
 }

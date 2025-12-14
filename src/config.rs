@@ -3,18 +3,26 @@ use std::{borrow::Cow, collections::HashMap};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    pub default: String,
-    pub services: HashMap<String, Service>,
+    /// The default service to run when none is specified.
+    pub default: Option<String>,
+    /// A mapping of service names to their configurations.
+    pub services: HashMap<String, ServiceConfiguration>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Service {
+pub struct ServiceConfiguration {
+    /// The action to be performed for the service (either `run` or `start`).
     #[serde(default, flatten)]
     pub action: Option<ServiceAction>,
+    /// The working directory for the service command, relative to the
+    /// directory containing the YAML file.
     #[serde(default)]
     pub cwd: Option<String>,
+    /// Specifies which output streams to display. If omitted, all streams
+    /// are displayed. An empty list means no output is displayed.
     #[serde(default)]
     pub display: Option<Vec<String>>,
+    /// A list of other services that must be started before this service.
     #[serde(default)]
     pub require: Vec<String>,
 }
@@ -82,7 +90,7 @@ mod tests {
     #[test]
     fn test_deserialize_example_yaml() {
         let config = load_config();
-        assert_eq!(config.default, "run");
+        assert_eq!(config.default.as_deref(), Some("run"));
         let map = &config.services;
         assert_eq!(
             map["database"].action,
@@ -150,15 +158,12 @@ mod tests {
     }
 
     #[test]
-    fn test_default_field_true() {
+    fn test_default_field_optional() {
         let yaml = r#"
-    default: service
-    services:
-      service:
-        run: echo 'hi'
-    "#;
+            services: {}
+            "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.default, "service");
+        assert_eq!(config.default, None);
     }
 
     #[test]
@@ -171,11 +176,11 @@ mod tests {
     #[test]
     fn test_extra_fields_are_ignored() {
         let yaml = r#"
-    default: service
-    services:
-      service:
-        run: echo 'hi'
-        extra: value
+            default: service
+            services:
+            service:
+                run: echo 'hi'
+                extra: value
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
