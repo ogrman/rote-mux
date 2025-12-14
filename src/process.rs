@@ -144,7 +144,9 @@ mod tests {
         let result = proc.shut_down();
         assert!(result.is_ok(), "Process::shut_down should succeed");
         match proc.state {
-            ProcessState::Finished { .. } => {}
+            ProcessState::Finished { exit_code } => {
+                assert_eq!(exit_code, ExitCode::SUCCESS)
+            }
             _ => panic!("Process should be Finished after shut_down"),
         }
     }

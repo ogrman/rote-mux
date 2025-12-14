@@ -178,10 +178,10 @@ mod tests {
         let yaml = r#"
             default: service
             services:
-            service:
-                run: echo 'hi'
-                extra: value
-    "#;
+                service:
+                    run: echo 'hi'
+                    extra: value
+            "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let service = &config.services["service"];
         assert_eq!(
