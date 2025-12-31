@@ -3,7 +3,7 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 
-use rote::{Config, Process};
+use rote::Config;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -19,7 +19,8 @@ struct Args {
     services: Vec<String>,
 }
 
-fn main() -> anyhow::Result<()> {
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     let config_path = if let Some(config) = args.config {
@@ -28,13 +29,17 @@ fn main() -> anyhow::Result<()> {
         PathBuf::from("rote.yaml")
     };
 
-    let Some(yaml_dir) = config_path.parent() else {
+    let Some(_yaml_dir) = config_path.parent() else {
         anyhow::bail!("Failed to determine config file directory");
     };
 
     let yaml_str = fs::read_to_string(&config_path).context("Reading the config file")?;
 
-    let config: Config = serde_yaml::from_str(&yaml_str).context("Parsing the config file")?;
+    let _config: Config = serde_yaml::from_str(&yaml_str).context("Parsing the config file")?;
+
+    // TODO: Implement config-based process spawning
+    // For now, just call the hardcoded run function
+    rote::run().await?;
 
     Ok(())
 }
