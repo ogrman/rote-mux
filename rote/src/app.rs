@@ -202,12 +202,32 @@ pub async fn run(
             }
 
             UiEvent::ToggleStdout => {
-                panels[active].show_stdout = !panels[active].show_stdout;
+                let p = &mut panels[active];
+                p.show_stdout = !p.show_stdout;
+                if p.show_stdout {
+                    let max = visible_len(p).saturating_sub(1);
+                    p.scroll = max;
+                    p.follow = true;
+                } else {
+                    let max = visible_len(p).saturating_sub(1);
+                    p.scroll = p.scroll.min(max);
+                    p.follow = p.scroll == max;
+                }
                 redraw = true;
             }
 
             UiEvent::ToggleStderr => {
-                panels[active].show_stderr = !panels[active].show_stderr;
+                let p = &mut panels[active];
+                p.show_stderr = !p.show_stderr;
+                if p.show_stderr {
+                    let max = visible_len(p).saturating_sub(1);
+                    p.scroll = max;
+                    p.follow = true;
+                } else {
+                    let max = visible_len(p).saturating_sub(1);
+                    p.scroll = p.scroll.min(max);
+                    p.follow = p.scroll == max;
+                }
                 redraw = true;
             }
 

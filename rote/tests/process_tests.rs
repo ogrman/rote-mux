@@ -974,3 +974,89 @@ async fn test_draw_logic_with_many_lines() {
     assert_eq!(lines[8], "line 9\n");
     assert_eq!(lines[9], "line 10\n");
 }
+
+#[tokio::test]
+async fn test_toggle_stream_visibility() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo stdout1; echo stderr1 >&2; echo stdout2; echo stderr2 >&2".to_string(),
+    ];
+
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    // Collect events
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                if let UiEvent::Line { stream, text, .. } = event {
+                    match stream {
+                        StreamKind::Stdout => panel.stdout.push(&text),
+                        StreamKind::Stderr => panel.stderr.push(&text),
+                    }
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Verify initial state: only stdout shown
+    assert_eq!(visible_len(&panel), 2);
+
+    // Toggle stderr on
+    panel.show_stderr = true;
+    let max = visible_len(&panel).saturating_sub(1);
+    panel.scroll = max;
+    panel.follow = true;
+
+    // Now should show 4 lines (2 stdout + 2 stderr)
+    assert_eq!(visible_len(&panel), 4);
+    assert_eq!(panel.scroll, 3, "Scroll should be at bottom");
+    assert_eq!(panel.follow, true, "Should be following");
+
+    // Toggle stderr off
+    panel.show_stderr = false;
+    let max = visible_len(&panel).saturating_sub(1);
+    panel.scroll = panel.scroll.min(max);
+    panel.follow = panel.scroll == max;
+
+    // Back to 2 lines
+    assert_eq!(visible_len(&panel), 2);
+    assert_eq!(panel.scroll, 1, "Scroll should be clamped to bottom");
+    assert_eq!(panel.follow, true, "Should still be following");
+
+    // Toggle stdout off
+    panel.show_stdout = false;
+    let max = visible_len(&panel).saturating_sub(1);
+    panel.scroll = panel.scroll.min(max);
+    panel.follow = panel.scroll == max;
+
+    // No lines shown
+    assert_eq!(visible_len(&panel), 0);
+    assert_eq!(panel.scroll, 0, "Scroll should be 0");
+
+    // Toggle stdout back on
+    panel.show_stdout = true;
+    let max = visible_len(&panel).saturating_sub(1);
+    panel.scroll = max;
+    panel.follow = true;
+
+    // Back to 2 lines, should be at bottom
+    assert_eq!(visible_len(&panel), 2);
+    assert_eq!(panel.scroll, 1, "Scroll should be at bottom");
+    assert_eq!(panel.follow, true, "Should be following");
+}
