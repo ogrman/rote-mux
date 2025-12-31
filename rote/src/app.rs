@@ -251,10 +251,22 @@ pub async fn run(
 fn visible_len(p: &Panel) -> usize {
     let mut n = 0;
     if p.show_stdout {
-        n += p.stdout.rope.len_lines();
+        // rope.len_lines() includes an extra empty line after the final newline,
+        // so we subtract 1 if there's any content, otherwise keep it at 0
+        let lines = p.stdout.rope.len_lines();
+        n += if lines > 0 {
+            lines.saturating_sub(1)
+        } else {
+            0
+        };
     }
     if p.show_stderr {
-        n += p.stderr.rope.len_lines();
+        let lines = p.stderr.rope.len_lines();
+        n += if lines > 0 {
+            lines.saturating_sub(1)
+        } else {
+            0
+        };
     }
     n
 }

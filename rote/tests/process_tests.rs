@@ -7,6 +7,28 @@ use rote::process::spawn_process;
 use rote::signals::terminate_child;
 use rote::ui::UiEvent;
 
+/// Helper to simulate visible_len calculation from app.rs
+fn visible_len(panel: &Panel) -> usize {
+    let mut n = 0;
+    if panel.show_stdout {
+        let lines = panel.stdout.rope.len_lines();
+        n += if lines > 0 {
+            lines.saturating_sub(1)
+        } else {
+            0
+        };
+    }
+    if panel.show_stderr {
+        let lines = panel.stderr.rope.len_lines();
+        n += if lines > 0 {
+            lines.saturating_sub(1)
+        } else {
+            0
+        };
+    }
+    n
+}
+
 /// Helper function to collect output events from a process
 async fn collect_output_events(
     mut rx: mpsc::Receiver<UiEvent>,
@@ -661,4 +683,144 @@ async fn test_continuous_output() {
     assert_eq!(stdout_lines[2], "output 3");
     assert_eq!(stdout_lines[3], "output 4");
     assert_eq!(stdout_lines[4], "output 5");
+}
+
+#[tokio::test]
+async fn test_visible_len_calculation() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo line1; echo line2; echo line3".to_string(),
+    ];
+
+    let mut panel = Panel::new(
+        "test".to_string(),
+        cmd.clone(),
+        None,
+        true,  // show_stdout
+        false, // show_stderr
+    );
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    // Collect events and add them to the panel
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                match event {
+                    UiEvent::Line { stream, text, .. } => {
+                        match stream {
+                            StreamKind::Stdout => panel.stdout.push(&text),
+                            StreamKind::Stderr => panel.stderr.push(&text),
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // After adding 3 lines, rope.len_lines() = 4 (3 lines + empty line after final \n)
+    assert_eq!(panel.stdout.rope.len_lines(), 4);
+
+    // But visible_len should return 3 (the actual number of text lines)
+    assert_eq!(visible_len(&panel), 3);
+
+    // When following, scroll should be set to visible_len - 1 = 2
+    // This means we start rendering from line index 2, which shows line3
+    let scroll = visible_len(&panel).saturating_sub(1);
+    assert_eq!(scroll, 2);
+
+    // Verify we can access all lines
+    let all_lines: Vec<String> = panel.stdout.rope.lines().map(|l| l.to_string()).collect();
+    assert_eq!(all_lines.len(), 4); // includes empty line
+    assert_eq!(all_lines[0], "line1\n");
+    assert_eq!(all_lines[1], "line2\n");
+    assert_eq!(all_lines[2], "line3\n");
+    assert_eq!(all_lines[3], ""); // empty line after final newline
+}
+
+#[tokio::test]
+async fn test_scroll_with_continuous_output() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "for i in 1 2 3 4 5; do echo \"line $i\"; done".to_string(),
+    ];
+
+    let mut panel = Panel::new(
+        "test".to_string(),
+        cmd.clone(),
+        None,
+        true, // show_stdout
+        true, // show_stderr
+    );
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    // Simulate the scroll update logic from app.rs
+    let mut scroll = 0;
+    let follow = true;
+
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                match event {
+                    UiEvent::Line { stream, text, .. } => {
+                        let at_bottom = follow;
+
+                        match stream {
+                            StreamKind::Stdout => panel.stdout.push(&text),
+                            StreamKind::Stderr => panel.stderr.push(&text),
+                        }
+
+                        if at_bottom {
+                            scroll = visible_len(&panel).saturating_sub(1);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            result = proc.child.wait() => {
+                assert!(result.is_ok());
+                // Continue collecting any remaining events
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // After 5 lines, visible_len should be 5
+    assert_eq!(visible_len(&panel), 5);
+
+    // Scroll should be at the last line (4)
+    assert_eq!(scroll, 4);
+
+    // Verify we can render from scroll position
+    let all_lines: Vec<String> = panel.stdout.rope.lines().map(|l| l.to_string()).collect();
+    assert!(
+        scroll < all_lines.len(),
+        "Scroll position should be within bounds"
+    );
+
+    // The line at scroll position should be the last text line
+    assert_eq!(all_lines[scroll], "line 5\n");
 }
