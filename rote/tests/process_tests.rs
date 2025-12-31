@@ -824,3 +824,153 @@ async fn test_scroll_with_continuous_output() {
     // The line at scroll position should be the last text line
     assert_eq!(all_lines[scroll], "line 5\n");
 }
+
+#[tokio::test]
+async fn test_draw_logic_with_few_lines() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo line1; echo line2; echo line3".to_string(),
+    ];
+
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    // Collect events and update panel
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    let mut scroll = 0;
+    let follow = true;
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                if let UiEvent::Line { stream: StreamKind::Stdout, text, .. } = event {
+                    let at_bottom = follow;
+                    panel.stdout.push(&text);
+                    if at_bottom {
+                        scroll = visible_len(&panel).saturating_sub(1);
+                    }
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Simulate draw function with large terminal (height > number of lines)
+    let height: usize = 10;
+    let mut lines: Vec<String> = panel.stdout.rope.lines().map(|l| l.to_string()).collect();
+
+    // Skip trailing empty line
+    if let Some(last) = lines.last() {
+        if last.is_empty() {
+            lines.pop();
+        }
+    }
+
+    let start = scroll
+        .saturating_sub(height.saturating_sub(1))
+        .min(lines.len());
+    let end = (scroll + 1).min(lines.len());
+
+    // With 3 lines, scroll=2, height=10:
+    // start = 2.saturating_sub(9) = 0
+    // end = min(3, 3) = 3
+    // Should show all 3 lines
+    assert_eq!(start, 0, "Start should be 0 when content fits");
+    assert_eq!(end, 3, "End should be 3 (all lines)");
+    assert_eq!(
+        lines[start..end].len(),
+        3,
+        "Should show all 3 lines when terminal is large"
+    );
+    assert_eq!(lines[0], "line1\n");
+    assert_eq!(lines[1], "line2\n");
+    assert_eq!(lines[2], "line3\n");
+}
+
+#[tokio::test]
+async fn test_draw_logic_with_many_lines() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "for i in {1..10}; do echo \"line $i\"; done".to_string(),
+    ];
+
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    // Collect events and update panel
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    let mut scroll = 0;
+    let follow = true;
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                if let UiEvent::Line { stream: StreamKind::Stdout, text, .. } = event {
+                    let at_bottom = follow;
+                    panel.stdout.push(&text);
+                    if at_bottom {
+                        scroll = visible_len(&panel).saturating_sub(1);
+                    }
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Simulate draw function with small terminal (height < number of lines)
+    let height: usize = 3;
+    let mut lines: Vec<String> = panel.stdout.rope.lines().map(|l| l.to_string()).collect();
+
+    // Skip trailing empty line
+    if let Some(last) = lines.last() {
+        if last.is_empty() {
+            lines.pop();
+        }
+    }
+
+    let start = scroll
+        .saturating_sub(height.saturating_sub(1))
+        .min(lines.len());
+    let end = (scroll + 1).min(lines.len());
+
+    // With 10 lines, scroll=9, height=3:
+    // start = 9.saturating_sub(2) = 7
+    // end = min(10, 10) = 10
+    // Should show last 3 lines: lines[7..10] = [line8, line9, line10]
+    assert_eq!(start, 7, "Start should show last 3 lines");
+    assert_eq!(end, 10, "End should include all lines");
+    assert_eq!(
+        lines[start..end].len(),
+        3,
+        "Should show exactly 3 lines (terminal height)"
+    );
+    assert_eq!(lines[7], "line 8\n");
+    assert_eq!(lines[8], "line 9\n");
+    assert_eq!(lines[9], "line 10\n");
+}

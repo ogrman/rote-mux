@@ -276,7 +276,7 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, panel: &Panel) ->
         let area = f.size();
         let height = area.height.saturating_sub(2) as usize;
 
-        let mut lines = Vec::with_capacity(height);
+        let mut lines = Vec::new();
 
         if panel.show_stdout {
             lines.extend(panel.stdout.rope.lines());
@@ -285,8 +285,18 @@ fn draw(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, panel: &Panel) ->
             lines.extend(panel.stderr.rope.lines());
         }
 
-        let start = panel.scroll.min(lines.len());
-        let end = (start + height).min(lines.len());
+        // Skip trailing empty line if present
+        if let Some(last) = lines.last() {
+            if last.len_chars() == 0 {
+                lines.pop();
+            }
+        }
+
+        let start = panel
+            .scroll
+            .saturating_sub(height.saturating_sub(1))
+            .min(lines.len());
+        let end = (panel.scroll + 1).min(lines.len());
         let text = lines[start..end]
             .iter()
             .map(|line| line.to_string())
