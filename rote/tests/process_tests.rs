@@ -136,10 +136,10 @@ async fn test_terminate_child_respects_sigint() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
 
     let script_path = format!(
-        "{}/tests/data/respects_sigint.py",
+        "{}/tests/data/respects_sigint.sh",
         env!("CARGO_MANIFEST_DIR")
     );
-    let cmd = vec!["python3".to_string(), script_path];
+    let cmd = vec![script_path];
 
     let mut proc = spawn_process(0, &cmd, tx);
 
@@ -181,10 +181,10 @@ async fn test_terminate_child_escalates_to_sigterm() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
 
     let script_path = format!(
-        "{}/tests/data/respects_sigterm.py",
+        "{}/tests/data/respects_sigterm.sh",
         env!("CARGO_MANIFEST_DIR")
     );
-    let cmd = vec!["python3".to_string(), script_path];
+    let cmd = vec![script_path];
 
     let mut proc = spawn_process(0, &cmd, tx);
 
