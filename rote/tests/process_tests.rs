@@ -1060,3 +1060,42 @@ async fn test_toggle_stream_visibility() {
     assert_eq!(panel.scroll, 1, "Scroll should be at bottom");
     assert_eq!(panel.follow, true, "Should be following");
 }
+
+#[tokio::test]
+async fn test_terminate_multiple_processes() {
+    let (tx, rx) = mpsc::channel::<UiEvent>(100);
+
+    // Spawn multiple long-running processes
+    let cmd1 = vec!["sleep".to_string(), "0.1".to_string()];
+    let cmd2 = vec!["sleep".to_string(), "0.1".to_string()];
+    let cmd3 = vec!["sleep".to_string(), "0.1".to_string()];
+
+    let mut proc1 = spawn_process(0, &cmd1, None, tx.clone());
+    let mut proc2 = spawn_process(1, &cmd2, None, tx.clone());
+    let mut proc3 = spawn_process(2, &cmd3, None, tx.clone());
+
+    // Give processes time to start
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Verify all processes are running
+    assert!(proc1.child.try_wait().unwrap().is_none());
+    assert!(proc2.child.try_wait().unwrap().is_none());
+    assert!(proc3.child.try_wait().unwrap().is_none());
+
+    // Terminate all processes (simulating Exit event handler)
+    terminate_child(&mut proc1.child).await;
+    terminate_child(&mut proc2.child).await;
+    terminate_child(&mut proc3.child).await;
+
+    // Verify all processes are terminated
+    let status1 = proc1.child.try_wait().unwrap();
+    let status2 = proc2.child.try_wait().unwrap();
+    let status3 = proc3.child.try_wait().unwrap();
+
+    assert!(status1.is_some(), "Process 1 should be terminated");
+    assert!(status2.is_some(), "Process 2 should be terminated");
+    assert!(status3.is_some(), "Process 3 should be terminated");
+
+    // Clean up receiver
+    drop(rx);
+}

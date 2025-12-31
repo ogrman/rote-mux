@@ -1,18 +1,8 @@
-default: run
+default: ping-demo
 services:
-  database:
-    start: bash -c 'echo "Database running"; tail -f /dev/null'
-    display: []
-  frontend:
-    cwd: frontend
-    start: scripts/frontend.sh
-    display: [stderr]
-  backend:
-    cwd: backend
-    start: scripts/backend.sh
-    require: [database, setup]
-    # stdout and stderr are displayed by default
-  setup:
-    run: scripts/setup.sh
-  run:
-    require: [backend, frontend]
+  google-ping:
+    start: ping google.com
+  cloudflare-ping:
+    start: ping 1.1.1.1
+  ping-demo:
+    require: [google-ping, cloudflare-ping]

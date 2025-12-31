@@ -29,13 +29,59 @@ pub async fn run(
     services_to_run: Vec<String>,
     config_dir: PathBuf,
 ) -> io::Result<()> {
-    enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen)?;
+    run_with_input(config, services_to_run, config_dir, None).await
+}
+
+pub async fn run_with_input(
+    config: Config,
+    services_to_run: Vec<String>,
+    config_dir: PathBuf,
+    mut external_rx: Option<tokio::sync::mpsc::Receiver<UiEvent>>,
+) -> io::Result<()> {
+    let enable_terminal = external_rx.is_none();
+    if enable_terminal {
+        enable_raw_mode()?;
+        execute!(io::stdout(), EnterAlternateScreen)?;
+    }
 
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<UiEvent>(1024);
+    let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<UiEvent>(1024);
+
+    // If external receiver is provided, use it directly with keyboard task via select!
+    // Otherwise, just use keyboard task
+    let keyboard_task = if external_rx.is_none() {
+        let tx_kb = internal_tx.clone();
+        Some(tokio::spawn(async move {
+            loop {
+                if event::poll(Duration::from_millis(250)).unwrap() {
+                    if let Event::Key(k) = event::read().unwrap() {
+                        let ev = match k.code {
+                            KeyCode::Char('q') => UiEvent::Exit,
+                            KeyCode::Char('R') => UiEvent::Restart,
+                            KeyCode::Char('o') => UiEvent::ToggleStdout,
+                            KeyCode::Char('e') => UiEvent::ToggleStderr,
+                            KeyCode::Char(c @ '1'..='9') => {
+                                UiEvent::SwitchPanel((c as u8 - b'1') as usize)
+                            }
+                            KeyCode::Up => UiEvent::Scroll(-1),
+                            KeyCode::Down => UiEvent::Scroll(1),
+                            KeyCode::PageUp => UiEvent::Scroll(-20),
+                            KeyCode::PageDown => UiEvent::Scroll(20),
+                            _ => continue,
+                        };
+                        let _ = tx_kb.send(ev).await;
+                    }
+                }
+            }
+        }))
+    } else {
+        None
+    };
+
+    // The sender to use for spawning processes - always internal_tx
+    let tx = internal_tx.clone();
 
     // Resolve which services to run
     let target_services = if services_to_run.is_empty() {
@@ -122,10 +168,10 @@ pub async fn run(
 
     let mut active = 0;
 
-    // keyboard
-    {
-        let tx = tx.clone();
-        tokio::spawn(async move {
+    // keyboard - spawn if we created internal_tx (i.e., no external input)
+    let _keyboard_task = if external_rx.is_none() {
+        let tx_kb = tx.clone();
+        Some(tokio::spawn(async move {
             loop {
                 if event::poll(Duration::from_millis(250)).unwrap() {
                     if let Event::Key(k) = event::read().unwrap() {
@@ -143,16 +189,30 @@ pub async fn run(
                             KeyCode::PageDown => UiEvent::Scroll(20),
                             _ => continue,
                         };
-                        let _ = tx.send(ev).await;
+                        let _ = tx_kb.send(ev).await;
                     }
                 }
             }
-        });
-    }
+        }))
+    } else {
+        None
+    };
 
     draw(&mut terminal, &panels[active])?;
 
-    while let Some(ev) = rx.recv().await {
+    loop {
+        let ev = if let Some(ref mut external) = external_rx {
+            tokio::select! {
+                Some(ev) = internal_rx.recv() => Some(ev),
+                Some(ev) = external.recv() => Some(ev),
+            }
+        } else {
+            internal_rx.recv().await
+        };
+
+        let Some(ev) = ev else {
+            break;
+        };
         let mut redraw = false;
 
         match ev {
@@ -251,6 +311,9 @@ pub async fn run(
                 for p in procs.iter_mut().flatten() {
                     terminate_child(&mut p.child).await;
                 }
+                if let Some(task) = keyboard_task {
+                    task.abort();
+                }
                 break;
             }
 
@@ -262,9 +325,11 @@ pub async fn run(
         }
     }
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
+    if enable_terminal {
+        disable_raw_mode()?;
+        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+        terminal.show_cursor()?;
+    }
     Ok(())
 }
 
