@@ -31,7 +31,9 @@ impl StreamBuf {
 
 pub struct Panel {
     pub title: String,
+    pub service_name: String,
     pub cmd: Vec<String>,
+    pub cwd: Option<String>,
     pub stdout: StreamBuf,
     pub stderr: StreamBuf,
     pub scroll: usize,
@@ -41,16 +43,24 @@ pub struct Panel {
 }
 
 impl Panel {
-    pub fn new(cmd: Vec<String>) -> Self {
+    pub fn new(
+        service_name: String,
+        cmd: Vec<String>,
+        cwd: Option<String>,
+        show_stdout: bool,
+        show_stderr: bool,
+    ) -> Self {
         Self {
-            title: cmd.join(" "),
+            title: service_name.clone(),
+            service_name,
             cmd,
+            cwd,
             stdout: StreamBuf::new(),
             stderr: StreamBuf::new(),
             scroll: 0,
             follow: true,
-            show_stdout: true,
-            show_stderr: true,
+            show_stdout,
+            show_stderr,
         }
     }
 }

@@ -29,17 +29,16 @@ async fn main() -> anyhow::Result<()> {
         PathBuf::from("rote.yaml")
     };
 
-    let Some(_yaml_dir) = config_path.parent() else {
-        anyhow::bail!("Failed to determine config file directory");
-    };
+    let yaml_dir = config_path
+        .parent()
+        .ok_or_else(|| anyhow::anyhow!("Failed to determine config file directory"))?
+        .to_path_buf();
 
     let yaml_str = fs::read_to_string(&config_path).context("Reading the config file")?;
 
-    let _config: Config = serde_yaml::from_str(&yaml_str).context("Parsing the config file")?;
+    let config: Config = serde_yaml::from_str(&yaml_str).context("Parsing the config file")?;
 
-    // TODO: Implement config-based process spawning
-    // For now, just call the hardcoded run function
-    rote::run().await?;
+    rote::run(config, args.services, yaml_dir).await?;
 
     Ok(())
 }

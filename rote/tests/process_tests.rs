@@ -43,7 +43,7 @@ async fn test_spawn_simple_process() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
     let cmd = vec!["echo".to_string(), "hello world".to_string()];
 
-    let mut proc = spawn_process(0, &cmd, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx);
 
     // Wait for process to complete
     let status = timeout(Duration::from_secs(2), proc.child.wait())
@@ -67,7 +67,7 @@ async fn test_capture_stdout_and_stderr() {
     let script_path = format!("{}/tests/data/echo_exit.sh", env!("CARGO_MANIFEST_DIR"));
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx);
 
     // Wait for process to complete
     let status = timeout(Duration::from_secs(2), proc.child.wait())
@@ -95,8 +95,8 @@ async fn test_multiple_panels() {
     let cmd1 = vec!["echo".to_string(), "panel0".to_string()];
     let cmd2 = vec!["echo".to_string(), "panel1".to_string()];
 
-    let mut proc1 = spawn_process(0, &cmd1, tx.clone());
-    let mut proc2 = spawn_process(1, &cmd2, tx.clone());
+    let mut proc1 = spawn_process(0, &cmd1, None, tx.clone());
+    let mut proc2 = spawn_process(1, &cmd2, None, tx.clone());
 
     // Wait for both processes
     let _ = timeout(Duration::from_secs(2), proc1.child.wait()).await;
@@ -141,7 +141,7 @@ async fn test_terminate_child_respects_sigint() {
     );
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx);
 
     // Give process time to start
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -186,7 +186,7 @@ async fn test_terminate_child_escalates_to_sigterm() {
     );
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx);
 
     // Give process time to start
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -235,7 +235,7 @@ async fn test_terminate_child_escalates_to_sigkill() {
     );
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx);
 
     // Give process time to start
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -284,7 +284,7 @@ async fn test_process_exit_status() {
 
     // Test successful exit
     let cmd = vec!["true".to_string()];
-    let mut proc = spawn_process(0, &cmd, tx.clone());
+    let mut proc = spawn_process(0, &cmd, None, tx.clone());
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
         .expect("Process timed out")
@@ -293,7 +293,7 @@ async fn test_process_exit_status() {
 
     // Test failed exit
     let cmd = vec!["false".to_string()];
-    let mut proc = spawn_process(0, &cmd, tx.clone());
+    let mut proc = spawn_process(0, &cmd, None, tx.clone());
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
         .expect("Process timed out")
@@ -307,7 +307,7 @@ async fn test_long_running_process() {
 
     // Start a process that sleeps for a while
     let cmd = vec!["sleep".to_string(), "0.5".to_string()];
-    let mut proc = spawn_process(0, &cmd, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx);
 
     // Verify process is still running
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -337,7 +337,7 @@ async fn test_process_with_args() {
         "arg3".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx);
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await

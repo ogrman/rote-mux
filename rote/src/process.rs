@@ -11,13 +11,23 @@ pub struct RunningProcess {
     pub child: Child,
 }
 
-pub fn spawn_process(panel: usize, cmd: &[String], tx: mpsc::Sender<UiEvent>) -> RunningProcess {
-    let mut child = Command::new(&cmd[0])
+pub fn spawn_process(
+    panel: usize,
+    cmd: &[String],
+    cwd: Option<&str>,
+    tx: mpsc::Sender<UiEvent>,
+) -> RunningProcess {
+    let mut command = Command::new(&cmd[0]);
+    command
         .args(&cmd[1..])
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .expect("spawn failed");
+        .stderr(std::process::Stdio::piped());
+
+    if let Some(cwd) = cwd {
+        command.current_dir(cwd);
+    }
+
+    let mut child = command.spawn().expect("spawn failed");
 
     let stdout = BufReader::new(child.stdout.take().unwrap()).lines();
     let stderr = BufReader::new(child.stderr.take().unwrap()).lines();

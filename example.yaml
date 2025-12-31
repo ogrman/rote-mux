@@ -1,0 +1,8 @@
+default: ping-demo
+services:
+  google-ping:
+    start: ping google.com
+  cloudflare-ping:
+    start: ping 1.1.1.1
+  ping-demo:
+    require: [google-ping, cloudflare-ping]
