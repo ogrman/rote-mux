@@ -2,7 +2,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use rote::panel::StreamKind;
+use rote::panel::{Panel, StreamKind};
 use rote::process::spawn_process;
 use rote::signals::terminate_child;
 use rote::ui::UiEvent;
@@ -349,4 +349,316 @@ async fn test_process_with_args() {
     let (stdout_lines, _) = collect_output_events(rx, 500).await;
     assert_eq!(stdout_lines.len(), 1);
     assert_eq!(stdout_lines[0], "arg1 arg2 arg3");
+}
+
+#[tokio::test]
+async fn test_multiline_stdout() {
+    let (tx, rx) = mpsc::channel::<UiEvent>(100);
+
+    // Use a command that outputs multiple lines
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo line1; echo line2; echo line3".to_string(),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    let (stdout_lines, _) = collect_output_events(rx, 500).await;
+    assert_eq!(stdout_lines.len(), 3);
+    assert_eq!(stdout_lines[0], "line1");
+    assert_eq!(stdout_lines[1], "line2");
+    assert_eq!(stdout_lines[2], "line3");
+}
+
+#[tokio::test]
+async fn test_rapid_output() {
+    let (tx, rx) = mpsc::channel::<UiEvent>(100);
+
+    // Generate many lines quickly
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "for i in {1..50}; do echo \"line $i\"; done".to_string(),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    let (stdout_lines, _) = collect_output_events(rx, 1000).await;
+    assert_eq!(stdout_lines.len(), 50, "Should capture all 50 lines");
+    assert_eq!(stdout_lines[0], "line 1");
+    assert_eq!(stdout_lines[49], "line 50");
+}
+
+#[tokio::test]
+async fn test_interleaved_stdout_stderr() {
+    let (tx, rx) = mpsc::channel::<UiEvent>(100);
+
+    // Output to both stdout and stderr in sequence
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo out1; echo err1 >&2; echo out2; echo err2 >&2; echo out3".to_string(),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    let (stdout_lines, stderr_lines) = collect_output_events(rx, 500).await;
+
+    assert_eq!(stdout_lines.len(), 3);
+    assert_eq!(stdout_lines[0], "out1");
+    assert_eq!(stdout_lines[1], "out2");
+    assert_eq!(stdout_lines[2], "out3");
+
+    assert_eq!(stderr_lines.len(), 2);
+    assert_eq!(stderr_lines[0], "err1");
+    assert_eq!(stderr_lines[1], "err2");
+}
+
+#[tokio::test]
+async fn test_long_lines() {
+    let (tx, rx) = mpsc::channel::<UiEvent>(100);
+
+    // Create a very long line
+    let long_str = "x".repeat(1000);
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        format!("echo {}", long_str),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    let (stdout_lines, _) = collect_output_events(rx, 500).await;
+    assert_eq!(stdout_lines.len(), 1);
+    assert_eq!(stdout_lines[0], long_str);
+}
+
+#[tokio::test]
+async fn test_empty_lines() {
+    let (tx, rx) = mpsc::channel::<UiEvent>(100);
+
+    // Output with empty lines
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo line1; echo; echo line3; echo".to_string(),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    let (stdout_lines, _) = collect_output_events(rx, 500).await;
+    assert_eq!(stdout_lines.len(), 4);
+    assert_eq!(stdout_lines[0], "line1");
+    assert_eq!(stdout_lines[1], "");
+    assert_eq!(stdout_lines[2], "line3");
+    assert_eq!(stdout_lines[3], "");
+}
+
+#[tokio::test]
+async fn test_panel_stdout_buffer() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo line1; echo line2; echo line3".to_string(),
+    ];
+
+    let mut panel = Panel::new(
+        "test".to_string(),
+        cmd.clone(),
+        None,
+        true, // show_stdout
+        true, // show_stderr
+    );
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    // Collect events and add them to the panel
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                match event {
+                    UiEvent::Line { stream, text, .. } => {
+                        match stream {
+                            StreamKind::Stdout => panel.stdout.push(&text),
+                            StreamKind::Stderr => panel.stderr.push(&text),
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Verify the panel buffer contains the lines
+    assert_eq!(panel.stdout.rope.len_lines(), 4); // 3 lines + final newline = 4 lines in rope
+
+    let lines: Vec<String> = panel
+        .stdout
+        .rope
+        .lines()
+        .map(|line| line.to_string())
+        .collect();
+
+    // Each line from rope.lines() includes its terminating newline
+    assert_eq!(lines[0], "line1\n");
+    assert_eq!(lines[1], "line2\n");
+    assert_eq!(lines[2], "line3\n");
+}
+
+#[tokio::test]
+async fn test_panel_stderr_buffer() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo err1 >&2; echo err2 >&2".to_string(),
+    ];
+
+    let mut panel = Panel::new(
+        "test".to_string(),
+        cmd.clone(),
+        None,
+        true, // show_stdout
+        true, // show_stderr
+    );
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    let status = timeout(Duration::from_secs(2), proc.child.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    // Collect events and add them to the panel
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                match event {
+                    UiEvent::Line { stream, text, .. } => {
+                        match stream {
+                            StreamKind::Stdout => panel.stdout.push(&text),
+                            StreamKind::Stderr => panel.stderr.push(&text),
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Verify the panel buffer contains the lines
+    assert_eq!(panel.stderr.rope.len_lines(), 3); // 2 lines + final newline = 3 lines in rope
+
+    let lines: Vec<String> = panel
+        .stderr
+        .rope
+        .lines()
+        .map(|line| line.to_string())
+        .collect();
+
+    assert_eq!(lines[0], "err1\n");
+    assert_eq!(lines[1], "err2\n");
+}
+
+#[tokio::test]
+async fn test_continuous_output() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+
+    // Simulate a continuously outputting process like ping
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "for i in 1 2 3 4 5; do echo \"output $i\"; sleep 0.05; done".to_string(),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx);
+
+    // Don't wait for process to complete, but collect output as it comes
+    let mut stdout_lines = Vec::new();
+    let mut process_done = false;
+
+    let deadline = tokio::time::sleep(Duration::from_millis(1000));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                match event {
+                    UiEvent::Line { stream: StreamKind::Stdout, text, .. } => {
+                        stdout_lines.push(text);
+                    }
+                    _ => {}
+                }
+            }
+            result = proc.child.wait(), if !process_done => {
+                process_done = true;
+                assert!(result.is_ok());
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Should have received all 5 lines
+    assert_eq!(stdout_lines.len(), 5);
+    assert_eq!(stdout_lines[0], "output 1");
+    assert_eq!(stdout_lines[1], "output 2");
+    assert_eq!(stdout_lines[2], "output 3");
+    assert_eq!(stdout_lines[3], "output 4");
+    assert_eq!(stdout_lines[4], "output 5");
 }
