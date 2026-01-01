@@ -12,8 +12,10 @@ use crossterm::{
 };
 use ratatui::{
     Terminal,
+    layout::{Alignment, Constraint},
     prelude::CrosstermBackend,
-    widgets::{Block, Borders, Paragraph},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 
 use crate::{
@@ -205,6 +207,7 @@ pub async fn run_with_input(
 
     let mut active = 0;
     let mut status_panel = StatusPanel::new();
+    let mut showing_status = true;
 
     // keyboard - spawn if we created internal_tx (i.e., no external input)
     let keyboard_task = if external_rx.is_none() {
@@ -218,6 +221,7 @@ pub async fn run_with_input(
                             KeyCode::Char('R') => UiEvent::Restart,
                             KeyCode::Char('o') => UiEvent::ToggleStdout,
                             KeyCode::Char('e') => UiEvent::ToggleStderr,
+                            KeyCode::Char('s') => UiEvent::SwitchToStatus,
                             KeyCode::Char(c @ '1'..='9') => {
                                 UiEvent::SwitchPanel((c as u8 - b'1') as usize)
                             }
@@ -236,7 +240,19 @@ pub async fn run_with_input(
         None
     };
 
-    draw(&mut terminal, &panels[active])?;
+    // Initialize status panel with all panels
+    for (i, panel) in panels.iter().enumerate() {
+        status_panel.update_entry(panel.service_name.clone(), ProcessStatus::Running);
+        status_panel
+            .entry_indices
+            .insert(panel.service_name.clone(), i);
+    }
+
+    if showing_status {
+        draw_status(&mut terminal, &panels, &status_panel)?;
+    } else {
+        draw(&mut terminal, &panels[active])?;
+    }
 
     loop {
         let ev = if let Some(ref mut external) = external_rx {
@@ -331,6 +347,12 @@ pub async fn run_with_input(
 
             UiEvent::SwitchPanel(i) if i < panels.len() => {
                 active = i;
+                showing_status = false;
+                redraw = true;
+            }
+
+            UiEvent::SwitchToStatus => {
+                showing_status = true;
                 redraw = true;
             }
 
@@ -397,7 +419,11 @@ pub async fn run_with_input(
         }
 
         if redraw {
-            draw(&mut terminal, &panels[active])?;
+            if showing_status {
+                draw_status(&mut terminal, &panels, &status_panel)?;
+            } else {
+                draw(&mut terminal, &panels[active])?;
+            }
         }
     }
 
@@ -436,6 +462,91 @@ fn visible_len(p: &Panel) -> usize {
         };
     }
     n
+}
+
+fn draw_status(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    _panels: &[Panel],
+    status_panel: &StatusPanel,
+) -> io::Result<()> {
+    terminal.draw(|f| {
+        let area = f.size();
+
+        let chunks = ratatui::layout::Layout::default()
+            .direction(ratatui::layout::Direction::Vertical)
+            .margin(1)
+            .constraints(
+                [
+                    Constraint::Length(status_panel.entries.len() as u16 + 3),
+                    Constraint::Length(4),
+                ]
+                .as_ref(),
+            )
+            .split(area);
+
+        let table_area = chunks[0];
+        let help_area = chunks[1];
+
+        let header_style = Style::default()
+            .fg(Color::Reset)
+            .add_modifier(Modifier::BOLD);
+
+        let header = Row::new(vec![
+            Cell::from("#"),
+            Cell::from("Service").style(header_style),
+            Cell::from("Status").style(header_style),
+        ])
+        .style(Style::default().bg(Color::Reset));
+
+        let rows: Vec<Row> = status_panel
+            .entries
+            .iter()
+            .enumerate()
+            .map(|(i, entry)| {
+                let (status_text, status_color) = match entry.status {
+                    ProcessStatus::Running => ("● Running", Color::Green),
+                    ProcessStatus::Exited => ("✓ Exited", Color::Gray),
+                };
+
+                Row::new(vec![
+                    Cell::from((i + 1).to_string()),
+                    Cell::from(entry.service_name.clone()),
+                    Cell::from(status_text).style(Style::default().fg(status_color)),
+                ])
+            })
+            .collect();
+
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(3),
+                Constraint::Min(30),
+                Constraint::Min(10),
+            ],
+        )
+        .header(header)
+        .block(
+            Block::default()
+                .title("Process Status")
+                .borders(Borders::ALL),
+        );
+
+        f.render_widget(table, table_area);
+
+        let help_text = vec![
+            String::from("Press a number (1-9) to view a process"),
+            String::from("Press 's' to refresh this status screen"),
+            String::from("Press 'q' to quit"),
+        ]
+        .join("\n");
+
+        let help_widget = Paragraph::new(help_text)
+            .alignment(Alignment::Left)
+            .block(Block::default());
+
+        f.render_widget(help_widget, help_area);
+    })?;
+    Ok(())
 }
 
 fn draw(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, panel: &Panel) -> io::Result<()> {

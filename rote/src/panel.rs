@@ -1,4 +1,5 @@
 use ropey::Rope;
+use std::collections::HashMap;
 
 pub const MAX_LINES: usize = 5_000;
 
@@ -71,6 +72,7 @@ impl Panel {
 pub struct StatusPanel {
     pub entries: Vec<StatusEntry>,
     pub scroll: usize,
+    pub entry_indices: HashMap<String, usize>,
 }
 
 #[derive(Clone)]

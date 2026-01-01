@@ -24,6 +24,7 @@ pub enum UiEvent {
         status: ProcessStatus,
     },
     SwitchPanel(usize),
+    SwitchToStatus,
     Scroll(i32),
     ToggleStdout,
     ToggleStderr,
