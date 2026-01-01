@@ -18,11 +18,77 @@ use ratatui::{
 
 use crate::{
     config::{Config, ServiceAction},
-    panel::{Panel, StreamKind},
+    panel::{Panel, StatusPanel, StreamKind},
     process::{RunningProcess, spawn_process},
     signals::terminate_child,
-    ui::UiEvent,
+    ui::{ProcessStatus, UiEvent},
 };
+
+async fn wait_for_shutdown(
+    procs: &mut [Option<RunningProcess>],
+    panels: &[Panel],
+    status_panel: &mut StatusPanel,
+    enable_terminal: bool,
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+) -> io::Result<bool> {
+    loop {
+        // Check process status by polling try_wait
+        let mut all_exited = true;
+        for (i, proc) in procs.iter_mut().enumerate() {
+            if let Some(p) = proc {
+                if let Ok(Some(_)) = p.child.try_wait() {
+                    // Process has exited
+                    status_panel
+                        .update_entry(panels[i].service_name.clone(), ProcessStatus::Exited);
+                    if enable_terminal {
+                        draw_shutdown(terminal, status_panel)?;
+                    }
+                } else {
+                    all_exited = false;
+                }
+            }
+        }
+
+        if all_exited {
+            return Ok(true);
+        }
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn draw_shutdown(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    status_panel: &StatusPanel,
+) -> io::Result<()> {
+    terminal.draw(|f| {
+        let area = f.size();
+
+        let mut lines = vec![String::from("Shutting down...")];
+        lines.push(String::new());
+
+        for entry in &status_panel.entries {
+            let status_str = match entry.status {
+                ProcessStatus::Running => "●",
+                ProcessStatus::Exited => "✓",
+            };
+            lines.push(format!("  {} {}", status_str, entry.service_name));
+        }
+
+        lines.push(String::new());
+        lines.push(String::from("Waiting for all processes to exit..."));
+
+        let text = lines.join("\n");
+        let widget = Paragraph::new(text).block(
+            Block::default()
+                .title("Shutdown Progress")
+                .borders(Borders::ALL),
+        );
+
+        f.render_widget(widget, area);
+    })?;
+    Ok(())
+}
 
 pub async fn run(
     config: Config,
@@ -138,6 +204,7 @@ pub async fn run_with_input(
     .await?;
 
     let mut active = 0;
+    let mut status_panel = StatusPanel::new();
 
     // keyboard - spawn if we created internal_tx (i.e., no external input)
     let keyboard_task = if external_rx.is_none() {
@@ -286,13 +353,44 @@ pub async fn run_with_input(
 
             UiEvent::Exit => {
                 let _ = shutdown_tx.send(());
-                for p in procs.iter_mut().flatten() {
-                    terminate_child(&mut p.child).await;
+
+                // Initialize status panel with all running services
+                for (i, panel) in panels.iter().enumerate() {
+                    if procs[i].is_some() {
+                        status_panel
+                            .update_entry(panel.service_name.clone(), ProcessStatus::Running);
+                    }
                 }
-                if let Some(task) = keyboard_task {
+
+                // Terminate all processes
+                for p in procs.iter_mut() {
+                    if let Some(proc) = p {
+                        terminate_child(&mut proc.child).await;
+                    }
+                }
+
+                // Switch to showing shutdown progress
+                if enable_terminal {
+                    draw_shutdown(&mut terminal, &status_panel)?;
+                }
+
+                // Wait for all processes to exit
+                let shutdown_complete = wait_for_shutdown(
+                    &mut procs,
+                    &panels,
+                    &mut status_panel,
+                    enable_terminal,
+                    &mut terminal,
+                )
+                .await?;
+
+                if let Some(ref task) = keyboard_task {
                     task.abort();
                 }
-                break;
+
+                if shutdown_complete {
+                    break;
+                }
             }
 
             _ => {}

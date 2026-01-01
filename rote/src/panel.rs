@@ -40,6 +40,7 @@ pub struct Panel {
     pub follow: bool,
     pub show_stdout: bool,
     pub show_stderr: bool,
+    pub process_status: Option<crate::ui::ProcessStatus>,
 }
 
 impl Panel {
@@ -61,6 +62,40 @@ impl Panel {
             follow: true,
             show_stdout,
             show_stderr,
+            process_status: None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct StatusPanel {
+    pub entries: Vec<StatusEntry>,
+    pub scroll: usize,
+}
+
+#[derive(Clone)]
+pub struct StatusEntry {
+    pub service_name: String,
+    pub status: crate::ui::ProcessStatus,
+}
+
+impl StatusPanel {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn update_entry(&mut self, service_name: String, status: crate::ui::ProcessStatus) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.service_name == service_name)
+        {
+            entry.status = status;
+        } else {
+            self.entries.push(StatusEntry {
+                service_name,
+                status,
+            });
         }
     }
 }

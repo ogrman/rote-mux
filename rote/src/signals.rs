@@ -21,3 +21,13 @@ pub async fn terminate_child(child: &mut Child) {
 
     let _ = kill(pid, Signal::SIGKILL);
 }
+
+pub async fn wait_for_child_exit(child: &mut Child) -> bool {
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if child.try_wait().ok().flatten().is_some() {
+            return true;
+        }
+    }
+    false
+}
