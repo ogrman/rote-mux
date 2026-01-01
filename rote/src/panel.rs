@@ -79,6 +79,7 @@ pub struct StatusPanel {
 pub struct StatusEntry {
     pub service_name: String,
     pub status: crate::ui::ProcessStatus,
+    pub exit_code: Option<i32>,
 }
 
 impl StatusPanel {
@@ -97,7 +98,18 @@ impl StatusPanel {
             self.entries.push(StatusEntry {
                 service_name,
                 status,
+                exit_code: None,
             });
+        }
+    }
+
+    pub fn update_exit_code(&mut self, service_name: String, exit_code: Option<i32>) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.service_name == service_name)
+        {
+            entry.exit_code = exit_code;
         }
     }
 }

@@ -17,6 +17,7 @@ pub enum UiEvent {
     Exited {
         panel: usize,
         status: Option<ExitStatus>,
+        exit_code: Option<i32>,
         title: String,
     },
     ProcessStatus {

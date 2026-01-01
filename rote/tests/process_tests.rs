@@ -69,7 +69,7 @@ async fn test_spawn_simple_process() {
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Wait for process to complete
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -94,7 +94,7 @@ async fn test_capture_stdout_and_stderr() {
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Wait for process to complete
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -124,8 +124,8 @@ async fn test_multiple_panels() {
     let mut proc2 = spawn_process(1, &cmd2, None, tx.clone(), shutdown_tx.subscribe());
 
     // Wait for both processes
-    let _ = timeout(Duration::from_secs(2), proc1.child.wait()).await;
-    let _ = timeout(Duration::from_secs(2), proc2.child.wait()).await;
+    let _ = timeout(Duration::from_secs(2), proc1.wait()).await;
+    let _ = timeout(Duration::from_secs(2), proc2.wait()).await;
 
     // Collect and verify events have correct panel IDs
     let mut panel0_lines = Vec::new();
@@ -174,7 +174,7 @@ async fn test_terminate_child_respects_sigint() {
 
     // Terminate the process
     let start = std::time::Instant::now();
-    terminate_child(&mut proc.child).await;
+    terminate_child(proc.pid).await;
     let elapsed = start.elapsed();
 
     // Should terminate quickly with SIGINT (within first 300ms window)
@@ -185,7 +185,7 @@ async fn test_terminate_child_respects_sigint() {
     );
 
     // Verify process is actually terminated
-    let status = proc.child.try_wait().expect("Failed to check status");
+    let status = proc.try_wait().expect("Failed to check status");
     assert!(status.is_some(), "Process should be terminated");
 
     // Collect output to verify the signal was handled
@@ -220,7 +220,7 @@ async fn test_terminate_child_escalates_to_sigterm() {
 
     // Terminate the process
     let start = std::time::Instant::now();
-    terminate_child(&mut proc.child).await;
+    terminate_child(proc.pid).await;
     let elapsed = start.elapsed();
 
     // Should take at least 300ms (SIGINT wait) but less than 1000ms
@@ -235,7 +235,7 @@ async fn test_terminate_child_escalates_to_sigterm() {
     );
 
     // Verify process is actually terminated
-    let status = proc.child.try_wait().expect("Failed to check status");
+    let status = proc.try_wait().expect("Failed to check status");
     assert!(status.is_some(), "Process should be terminated");
 
     // Collect output
@@ -270,7 +270,7 @@ async fn test_terminate_child_escalates_to_sigkill() {
 
     // Terminate the process
     let start = std::time::Instant::now();
-    terminate_child(&mut proc.child).await;
+    terminate_child(proc.pid).await;
     let elapsed = start.elapsed();
 
     // Should take at least 600ms (SIGINT + SIGTERM waits) but not too long
@@ -288,7 +288,7 @@ async fn test_terminate_child_escalates_to_sigkill() {
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     // Verify process is actually terminated
-    let status = proc.child.try_wait().expect("Failed to check status");
+    let status = proc.try_wait().expect("Failed to check status");
     assert!(status.is_some(), "Process should be terminated by SIGKILL");
 
     // Collect output
@@ -314,7 +314,7 @@ async fn test_process_exit_status() {
     // Test successful exit
     let cmd = vec!["true".to_string()];
     let mut proc = spawn_process(0, &cmd, None, tx.clone(), shutdown_tx.subscribe());
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -329,7 +329,7 @@ async fn test_process_exit_status() {
         tx.clone(),
         shutdown_tx.subscribe().resubscribe(),
     );
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -347,11 +347,11 @@ async fn test_long_running_process() {
 
     // Verify process is still running
     tokio::time::sleep(Duration::from_millis(100)).await;
-    let status = proc.child.try_wait().expect("Failed to check status");
+    let status = proc.try_wait().expect("Failed to check status");
     assert!(status.is_none(), "Process should still be running");
 
     // Wait for it to complete
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -376,7 +376,7 @@ async fn test_process_with_args() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -402,7 +402,7 @@ async fn test_multiline_stdout() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -430,7 +430,7 @@ async fn test_rapid_output() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -457,7 +457,7 @@ async fn test_interleaved_stdout_stderr() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -491,7 +491,7 @@ async fn test_long_lines() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -517,7 +517,7 @@ async fn test_empty_lines() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -553,7 +553,7 @@ async fn test_panel_stdout_buffer() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -618,7 +618,7 @@ async fn test_panel_stderr_buffer() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -691,7 +691,7 @@ async fn test_continuous_output() {
                     _ => {}
                 }
             }
-            result = proc.child.wait(), if !process_done => {
+            result = proc.wait(), if !process_done => {
                 process_done = true;
                 assert!(result.is_ok());
             }
@@ -729,7 +729,7 @@ async fn test_visible_len_calculation() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -824,7 +824,7 @@ async fn test_scroll_with_continuous_output() {
                     _ => {}
                 }
             }
-            result = proc.child.wait() => {
+            result = proc.wait() => {
                 assert!(result.is_ok());
                 // Continue collecting any remaining events
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -865,7 +865,7 @@ async fn test_draw_logic_with_few_lines() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -941,7 +941,7 @@ async fn test_draw_logic_with_many_lines() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -1017,7 +1017,7 @@ async fn test_toggle_stream_visibility() {
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
-    let status = timeout(Duration::from_secs(2), proc.child.wait())
+    let status = timeout(Duration::from_secs(2), proc.wait())
         .await
         .expect("Process timed out")
         .expect("Failed to wait for process");
@@ -1119,19 +1119,19 @@ async fn test_terminate_multiple_processes() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // Verify all processes are running
-    assert!(proc1.child.try_wait().unwrap().is_none());
-    assert!(proc2.child.try_wait().unwrap().is_none());
-    assert!(proc3.child.try_wait().unwrap().is_none());
+    assert!(proc1.try_wait().unwrap().is_none());
+    assert!(proc2.try_wait().unwrap().is_none());
+    assert!(proc3.try_wait().unwrap().is_none());
 
     // Terminate all processes (simulating Exit event handler)
-    terminate_child(&mut proc1.child).await;
-    terminate_child(&mut proc2.child).await;
-    terminate_child(&mut proc3.child).await;
+    terminate_child(proc1.pid).await;
+    terminate_child(proc2.pid).await;
+    terminate_child(proc3.pid).await;
 
     // Verify all processes are terminated
-    let status1 = proc1.child.try_wait().unwrap();
-    let status2 = proc2.child.try_wait().unwrap();
-    let status3 = proc3.child.try_wait().unwrap();
+    let status1 = proc1.try_wait().unwrap();
+    let status2 = proc2.try_wait().unwrap();
+    let status3 = proc3.try_wait().unwrap();
 
     assert!(status1.is_some(), "Process 1 should be terminated");
     assert!(status2.is_some(), "Process 2 should be terminated");

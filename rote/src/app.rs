@@ -34,11 +34,11 @@ async fn wait_for_shutdown(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
 ) -> io::Result<bool> {
     loop {
-        // Check process status by polling try_wait
+        // Check process status
         let mut all_exited = true;
         for (i, proc) in procs.iter_mut().enumerate() {
             if let Some(p) = proc {
-                if let Ok(Some(_)) = p.child.try_wait() {
+                if p.pid.is_none() || check_process_exited_by_pid(p.pid) {
                     // Process has exited
                     status_panel
                         .update_entry(panels[i].service_name.clone(), ProcessStatus::Exited);
@@ -56,6 +56,20 @@ async fn wait_for_shutdown(
         }
 
         tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+fn check_process_exited_by_pid(pid: Option<u32>) -> bool {
+    use nix::sys::signal::{Signal, kill};
+    use nix::unistd::Pid;
+    let Some(pid) = pid else {
+        return true;
+    };
+    let pid = Pid::from_raw(pid as i32);
+    match kill(pid, Signal::SIGUSR1) {
+        Err(nix::Error::ESRCH) => true, // Process does not exist
+        Ok(_) => false,                 // Process still exists
+        Err(_) => false,
     }
 }
 
@@ -193,6 +207,7 @@ pub async fn run_with_input(
     }
 
     // Start processes according to dependencies
+    let mut status_panel = StatusPanel::new();
     let mut procs: Vec<Option<RunningProcess>> = (0..panels.len()).map(|_| None).collect();
     start_services(
         &config,
@@ -202,11 +217,11 @@ pub async fn run_with_input(
         &mut procs,
         tx.clone(),
         &shutdown_tx,
+        &mut status_panel,
     )
     .await?;
 
     let mut active = 0;
-    let mut status_panel = StatusPanel::new();
     let mut showing_status = true;
     let mut prev_statuses_storage: Option<Vec<ProcessStatus>> = None;
 
@@ -251,12 +266,27 @@ pub async fn run_with_input(
         None
     };
 
-    // Initialize status panel with all panels
-    for (i, panel) in panels.iter().enumerate() {
-        status_panel.update_entry(panel.service_name.clone(), ProcessStatus::Running);
-        status_panel
-            .entry_indices
-            .insert(panel.service_name.clone(), i);
+    // Initialize status panel with all services that have actions
+    for service_name in &services_list {
+        let service_config = config.services.get(service_name).unwrap();
+
+        match &service_config.action {
+            Some(ServiceAction::Run { .. }) => {
+                status_panel.update_entry(service_name.clone(), ProcessStatus::Running);
+                status_panel
+                    .entry_indices
+                    .insert(service_name.clone(), usize::MAX);
+            }
+            Some(ServiceAction::Start { .. }) => {
+                if let Some(&panel_idx) = service_to_panel.get(service_name) {
+                    status_panel.update_entry(service_name.clone(), ProcessStatus::Running);
+                    status_panel
+                        .entry_indices
+                        .insert(service_name.clone(), panel_idx);
+                }
+            }
+            None => {}
+        }
     }
 
     if showing_status {
@@ -306,6 +336,7 @@ pub async fn run_with_input(
             UiEvent::Exited {
                 panel,
                 status,
+                exit_code,
                 title: _,
             } => {
                 let msg = format!(
@@ -314,6 +345,7 @@ pub async fn run_with_input(
                 );
                 panels[panel].stdout.push(&msg);
                 panels[panel].stderr.push(&msg);
+                status_panel.update_exit_code(panels[panel].service_name.clone(), exit_code);
                 redraw = panel == active;
             }
 
@@ -378,7 +410,7 @@ pub async fn run_with_input(
 
                 for (i, proc) in procs.iter_mut().enumerate() {
                     let current_status = if let Some(p) = proc {
-                        if let Ok(Some(_)) = p.child.try_wait() {
+                        if p.pid.is_none() || check_process_exited_by_pid(p.pid) {
                             ProcessStatus::Exited
                         } else {
                             ProcessStatus::Running
@@ -416,8 +448,8 @@ pub async fn run_with_input(
             }
 
             UiEvent::Restart => {
-                if let Some(mut proc) = procs[active].take() {
-                    terminate_child(&mut proc.child).await;
+                if let Some(proc) = procs[active].take() {
+                    terminate_child(proc.pid).await;
                 }
                 panels[active].stdout.push("[restarting]");
                 panels[active].stderr.push("[restarting]");
@@ -446,7 +478,7 @@ pub async fn run_with_input(
                 // Terminate all processes
                 for p in procs.iter_mut() {
                     if let Some(proc) = p {
-                        terminate_child(&mut proc.child).await;
+                        terminate_child(proc.pid).await;
                     }
                 }
 
@@ -492,6 +524,7 @@ pub async fn run_with_input(
         if let Some(proc) = p {
             proc._stdout_task.abort();
             proc._stderr_task.abort();
+            proc._wait_task.abort();
         }
     }
 
@@ -556,6 +589,7 @@ fn draw_status(
             Cell::from("#"),
             Cell::from("Service").style(header_style),
             Cell::from("Status").style(header_style),
+            Cell::from("Exit Code").style(header_style),
         ])
         .style(Style::default().bg(Color::Reset));
 
@@ -569,10 +603,19 @@ fn draw_status(
                     ProcessStatus::Exited => ("✓ Exited", Color::Gray),
                 };
 
+                let exit_code_text = match entry.status {
+                    ProcessStatus::Running => String::from("-"),
+                    ProcessStatus::Exited => entry
+                        .exit_code
+                        .map(|c| c.to_string())
+                        .unwrap_or_else(|| String::from("unknown")),
+                };
+
                 Row::new(vec![
                     Cell::from((i + 1).to_string()),
                     Cell::from(entry.service_name.clone()),
                     Cell::from(status_text).style(Style::default().fg(status_color)),
+                    Cell::from(exit_code_text),
                 ])
             })
             .collect();
@@ -582,6 +625,7 @@ fn draw_status(
             [
                 Constraint::Length(3),
                 Constraint::Min(30),
+                Constraint::Min(10),
                 Constraint::Min(10),
             ],
         )
@@ -719,6 +763,7 @@ async fn start_services(
     procs: &mut Vec<Option<RunningProcess>>,
     tx: tokio::sync::mpsc::Sender<UiEvent>,
     shutdown_tx: &tokio::sync::broadcast::Sender<()>,
+    status_panel: &mut StatusPanel,
 ) -> io::Result<()> {
     for service_name in services_list {
         let service_config = config.services.get(service_name).unwrap();
@@ -742,13 +787,16 @@ async fn start_services(
 
                 let status = command.status().await?;
 
+                let exit_code = status.code();
+                status_panel.update_entry(service_name.clone(), ProcessStatus::Exited);
+                status_panel.update_exit_code(service_name.clone(), exit_code);
+
                 if !status.success() {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!(
                             "Service '{}' failed with exit code: {:?}",
-                            service_name,
-                            status.code()
+                            service_name, exit_code
                         ),
                     ));
                 }
