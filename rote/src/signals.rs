@@ -24,8 +24,8 @@ pub async fn terminate_child(pid: Option<u32>) {
 }
 
 fn check_process_exited(pid: Pid) -> bool {
-    use nix::sys::signal::{Signal, kill};
-    match kill(pid, Signal::SIGUSR1) {
+    use nix::sys::signal::kill;
+    match kill(pid, None) {
         Err(nix::Error::ESRCH) => true, // Process does not exist
         Ok(_) => false,                 // Process still exists
         Err(_) => false,

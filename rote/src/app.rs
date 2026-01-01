@@ -60,13 +60,13 @@ async fn wait_for_shutdown(
 }
 
 fn check_process_exited_by_pid(pid: Option<u32>) -> bool {
-    use nix::sys::signal::{Signal, kill};
+    use nix::sys::signal::kill;
     use nix::unistd::Pid;
     let Some(pid) = pid else {
         return true;
     };
     let pid = Pid::from_raw(pid as i32);
-    match kill(pid, Signal::SIGUSR1) {
+    match kill(pid, None) {
         Err(nix::Error::ESRCH) => true, // Process does not exist
         Ok(_) => false,                 // Process still exists
         Err(_) => false,
