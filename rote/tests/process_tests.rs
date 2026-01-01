@@ -1,6 +1,6 @@
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout};
 
 use rote::panel::{Panel, StreamKind};
 use rote::process::spawn_process;
@@ -58,6 +58,64 @@ async fn collect_output_events(
     }
 
     (stdout_lines, stderr_lines)
+}
+
+#[tokio::test]
+async fn test_simple_wait() {
+    let (tx, _rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo test".to_string(),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+
+    sleep(Duration::from_millis(100)).await;
+
+    let result = proc.wait().await;
+    println!("wait result: {:?}", result);
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_wait_in_select() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo test".to_string(),
+    ];
+
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+
+    let mut process_done = false;
+    let deadline = sleep(Duration::from_millis(1000));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                match event {
+                    UiEvent::Line { .. } => {}
+                    _ => {}
+                }
+            }
+            result = proc.wait(), if !process_done => {
+                process_done = true;
+                println!("wait result: {:?}", result);
+                assert!(result.is_ok());
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Process should have completed
+    assert!(process_done);
 }
 
 #[tokio::test]
@@ -1000,6 +1058,173 @@ async fn test_draw_logic_with_many_lines() {
     assert_eq!(lines[7], "line 8\n");
     assert_eq!(lines[8], "line 9\n");
     assert_eq!(lines[9], "line 10\n");
+}
+
+#[tokio::test]
+async fn test_mixed_output_order_preservation() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo 'stdout1'; echo 'stderr1' >&2; echo 'stdout2'; echo 'stderr2' >&2; echo 'stdout3'; echo 'stderr3' >&2".to_string(),
+    ];
+
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, true);
+
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+
+    let status = timeout(Duration::from_secs(2), proc.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    let mut all_events = Vec::new();
+
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                if let UiEvent::Line { stream, text, .. } = event {
+                    all_events.push((stream, text.clone()));
+                    match stream {
+                        StreamKind::Stdout => panel.stdout.push(&text),
+                        StreamKind::Stderr => panel.stderr.push(&text),
+                    }
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    // Verify all events were received
+    assert_eq!(all_events.len(), 6);
+
+    // Collect stdout and stderr events separately and verify their order
+    let stdout_events: Vec<_> = all_events
+        .iter()
+        .filter(|(stream, _)| *stream == StreamKind::Stdout)
+        .map(|(_, text)| text.clone())
+        .collect();
+
+    let stderr_events: Vec<_> = all_events
+        .iter()
+        .filter(|(stream, _)| *stream == StreamKind::Stderr)
+        .map(|(_, text)| text.clone())
+        .collect();
+
+    assert_eq!(stdout_events, vec!["stdout1", "stdout2", "stdout3"]);
+    assert_eq!(stderr_events, vec!["stderr1", "stderr2", "stderr3"]);
+
+    // With both streams visible, total should be 6
+    assert_eq!(visible_len(&panel), 6);
+
+    // Verify order in stdout buffer
+    let stdout_lines: Vec<String> = panel.stdout.rope.lines().map(|l| l.to_string()).collect();
+    assert_eq!(stdout_lines[0], "stdout1\n");
+    assert_eq!(stdout_lines[1], "stdout2\n");
+    assert_eq!(stdout_lines[2], "stdout3\n");
+
+    // Verify order in stderr buffer
+    let stderr_lines: Vec<String> = panel.stderr.rope.lines().map(|l| l.to_string()).collect();
+    assert_eq!(stderr_lines[0], "stderr1\n");
+    assert_eq!(stderr_lines[1], "stderr2\n");
+    assert_eq!(stderr_lines[2], "stderr3\n");
+
+    // Toggle stderr off - order of stdout should be preserved
+    panel.show_stderr = false;
+    assert_eq!(visible_len(&panel), 3);
+
+    // Toggle stderr back on - both should still be present in correct order
+    panel.show_stderr = true;
+    assert_eq!(visible_len(&panel), 6);
+    assert_eq!(stdout_lines[0], "stdout1\n");
+    assert_eq!(stdout_lines[1], "stdout2\n");
+    assert_eq!(stdout_lines[2], "stdout3\n");
+    assert_eq!(stderr_lines[0], "stderr1\n");
+    assert_eq!(stderr_lines[1], "stderr2\n");
+    assert_eq!(stderr_lines[2], "stderr3\n");
+}
+
+#[tokio::test]
+async fn test_colored_output() {
+    let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
+
+    let cmd = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        "echo -e '\\033[31mRed text\\033[0m'; echo -e '\\033[32mGreen text\\033[0m'; echo -e '\\033[34mBlue text\\033[0m'".to_string(),
+    ];
+
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+
+    let status = timeout(Duration::from_secs(2), proc.wait())
+        .await
+        .expect("Process timed out")
+        .expect("Failed to wait for process");
+
+    assert!(status.success());
+
+    let deadline = tokio::time::sleep(Duration::from_millis(500));
+    tokio::pin!(deadline);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                if let UiEvent::Line { stream, text, .. } = event {
+                    match stream {
+                        StreamKind::Stdout => panel.stdout.push(&text),
+                        StreamKind::Stderr => panel.stderr.push(&text),
+                    }
+                }
+            }
+            _ = &mut deadline => break,
+        }
+    }
+
+    let stdout_lines: Vec<String> = panel.stdout.rope.lines().map(|l| l.to_string()).collect();
+    assert_eq!(stdout_lines.len(), 4);
+
+    assert!(
+        stdout_lines[0].contains("\x1b[31m"),
+        "Should contain red color code"
+    );
+    assert!(stdout_lines[0].contains("Red text"), "Should contain text");
+    assert!(
+        stdout_lines[0].contains("\x1b[0m"),
+        "Should contain reset code"
+    );
+
+    assert!(
+        stdout_lines[1].contains("\x1b[32m"),
+        "Should contain green color code"
+    );
+    assert!(
+        stdout_lines[1].contains("Green text"),
+        "Should contain text"
+    );
+    assert!(
+        stdout_lines[1].contains("\x1b[0m"),
+        "Should contain reset code"
+    );
+
+    assert!(
+        stdout_lines[2].contains("\x1b[34m"),
+        "Should contain blue color code"
+    );
+    assert!(stdout_lines[2].contains("Blue text"), "Should contain text");
+    assert!(
+        stdout_lines[2].contains("\x1b[0m"),
+        "Should contain reset code"
+    );
 }
 
 #[tokio::test]

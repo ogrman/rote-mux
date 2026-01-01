@@ -1,8 +1,8 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
-    process::{Child, Command},
-    sync::{Notify, mpsc, oneshot},
+    process::Command,
+    sync::{Notify, mpsc},
     task::JoinHandle,
 };
 
@@ -14,28 +14,29 @@ pub struct RunningProcess {
     pub _stdout_task: JoinHandle<()>,
     pub _stderr_task: JoinHandle<()>,
     pub _wait_task: JoinHandle<()>,
-    pub _exit_rx: oneshot::Receiver<std::io::Result<std::process::ExitStatus>>,
     pub _exit_notify: Arc<Notify>,
+    _exit_status: Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>>,
+    _exit_done: Arc<Notify>,
 }
 
 impl RunningProcess {
     pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-        let rx = std::mem::replace(&mut self._exit_rx, oneshot::channel().1);
-        rx.await.map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::BrokenPipe, "Process handle was dropped")
-        })?
+        self._exit_done.notified().await;
+        let result = self._exit_status.lock().unwrap().take().ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::Other, "Exit status not set")
+        })??;
+        Ok(result)
     }
 
     pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
-        match &self._exit_rx {
-            _ => match self._exit_rx.try_recv() {
-                Ok(result) => Ok(Some(result?)),
-                Err(oneshot::error::TryRecvError::Empty) => Ok(None),
-                Err(oneshot::error::TryRecvError::Closed) => Err(std::io::Error::new(
-                    std::io::ErrorKind::BrokenPipe,
-                    "Process handle was dropped",
-                )),
-            },
+        let status = self._exit_status.lock().unwrap();
+        match status.as_ref() {
+            None => Ok(None),
+            Some(Ok(s)) => Ok(Some(*s)),
+            Some(Err(e)) => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                e.to_string(),
+            )),
         }
     }
 }
@@ -123,13 +124,16 @@ pub fn spawn_process(
 
     let pid = child.id();
 
-    let (exit_tx_internal, exit_rx) = oneshot::channel();
-
     let exit_notify = Arc::new(Notify::new());
+    let exit_status: Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>> =
+        Arc::new(Mutex::new(None));
+    let exit_done = Arc::new(Notify::new());
 
     let exit_tx_ui = tx.clone();
     let panel_idx = panel;
     let exit_notify_clone = exit_notify.clone();
+    let exit_status_clone = exit_status.clone();
+    let exit_done_clone = exit_done.clone();
     let wait_task = tokio::spawn({
         let mut rx = shutdown_rx.resubscribe();
         async move {
@@ -148,7 +152,8 @@ pub fn spawn_process(
             let status = result.as_ref().ok().copied();
             exit_notify_clone.notify_one();
 
-            let _ = exit_tx_internal.send(result);
+            *exit_status_clone.lock().unwrap() = Some(result);
+            exit_done_clone.notify_one();
 
             if is_ok {
                 let _ = exit_tx_ui
@@ -177,7 +182,8 @@ pub fn spawn_process(
         _stdout_task: stdout_task,
         _stderr_task: stderr_task,
         _wait_task: wait_task,
-        _exit_rx: exit_rx,
         _exit_notify: exit_notify,
+        _exit_status: exit_status,
+        _exit_done: exit_done,
     }
 }

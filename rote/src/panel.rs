@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 pub const MAX_LINES: usize = 5_000;
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub enum StreamKind {
     Stdout,
     Stderr,

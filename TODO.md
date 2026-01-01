@@ -3,21 +3,41 @@ TODO Format:
 - Unsolved items should be at the top of the file
 - Additional explanation can be added on subsequent lines with 6-space indentation
 
-[   ] 2 process tests are failing (test_continuous_output,
-      test_scroll_with_continuous_output) due to architectural changes in
-      process handling. These are edge cases not related to the core features
-      implemented.
+ [ X ] 2 process tests are failing (test_continuous_output,
+       test_scroll_with_continuous_output) due to architectural changes in
+       process handling. Fixed by replacing oneshot channel with Arc<Mutex<Option>>>
+       to handle futures being dropped in tokio::select! loops.
 
-[   ] Write tests for mixed stdout/stderr output, including testing that
-      message order is preserved when stdout/stderr is toggled
+ [ X ] Write tests for mixed stdout/stderr output, including testing that
+       message order is preserved when stdout/stderr is toggled
 
-[   ] Analyze test coverage for the entire app and add TODOs for places where
-      tests are missing.
+ [ X ] Analyze test coverage for the entire app and add TODOs for places where
+       tests are missing.
 
-[   ] Test colored output from the child processes
+  [ X ] Test colored output from the child processes
 
-[ X ] 'run' type services now appear in the status panel and are tracked
-      correctly
+ [   ] Add unit tests for ui.rs:
+       - ProcessStatus enum variants and behavior
+       - UiEvent enum variants
+
+ [   ] Add unit tests for panel.rs:
+       - StreamBuf::push method and line truncation at MAX_LINES
+       - Panel::new constructor
+       - StatusPanel::new constructor
+       - StatusPanel::update_entry method
+       - StatusPanel::update_exit_code method
+       - StatusPanel::update_entry_with_action method
+
+ [   ] Add unit tests for signals.rs:
+       - terminate_child function with various signal scenarios
+       - wait_for_child_exit function
+
+ [   ] Add unit tests for app.rs:
+       - run function with different configurations
+       - run_with_input function for testing input handling
+
+ [ X ] 'run' type services now appear in the status panel and are tracked
+       correctly
 
 [ X ] Exit codes are now displayed in the status page for both 'run' and
       'start' type services
