@@ -771,6 +771,392 @@ fn resolve_dependencies(config: &Config, targets: &[String]) -> io::Result<Vec<S
     Ok(result)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_check_process_exited_by_pid_none() {
+        assert!(check_process_exited_by_pid(None));
+    }
+
+    #[test]
+    fn test_visible_len_empty_panel() {
+        let panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
+            None,
+            false,
+            false,
+        );
+        assert_eq!(visible_len(&panel), 0);
+    }
+
+    #[test]
+    fn test_visible_len_only_stdout() {
+        let mut panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
+            None,
+            true,
+            false,
+        );
+        panel.stdout.push("line 1");
+        panel.stdout.push("line 2");
+        assert_eq!(visible_len(&panel), 2);
+    }
+
+    #[test]
+    fn test_visible_len_only_stderr() {
+        let mut panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
+            None,
+            false,
+            true,
+        );
+        panel.stderr.push("error 1");
+        panel.stderr.push("error 2");
+        panel.stderr.push("error 3");
+        assert_eq!(visible_len(&panel), 3);
+    }
+
+    #[test]
+    fn test_visible_len_both_streams() {
+        let mut panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
+            None,
+            true,
+            true,
+        );
+        panel.stdout.push("line 1");
+        panel.stderr.push("error 1");
+        panel.stdout.push("line 2");
+        assert_eq!(visible_len(&panel), 3);
+    }
+
+    #[test]
+    fn test_resolve_dependencies_empty() {
+        let config = Config {
+            default: None,
+            services: HashMap::new(),
+        };
+        let result = resolve_dependencies(&config, &[]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_dependencies_no_deps() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec![],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
+        assert_eq!(result, vec!["service1"]);
+    }
+
+    #[test]
+    fn test_resolve_dependencies_with_deps() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["dep1".to_string()],
+            },
+        );
+        services.insert(
+            "dep1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec![],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
+        assert_eq!(result, vec!["dep1", "service1"]);
+    }
+
+    #[test]
+    fn test_resolve_dependencies_multiple_deps() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["dep1".to_string(), "dep2".to_string()],
+            },
+        );
+        services.insert(
+            "dep1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec![],
+            },
+        );
+        services.insert(
+            "dep2".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec![],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
+        assert!(result.contains(&"dep1".to_string()));
+        assert!(result.contains(&"dep2".to_string()));
+        assert!(result.contains(&"service1".to_string()));
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_resolve_dependencies_nested_deps() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["dep1".to_string()],
+            },
+        );
+        services.insert(
+            "dep1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["dep2".to_string()],
+            },
+        );
+        services.insert(
+            "dep2".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec![],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
+        assert_eq!(result, vec!["dep2", "dep1", "service1"]);
+    }
+
+    #[test]
+    fn test_resolve_dependencies_circular() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["service2".to_string()],
+            },
+        );
+        services.insert(
+            "service2".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["service1".to_string()],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result = resolve_dependencies(&config, &["service1".to_string()]);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Circular dependency")
+        );
+    }
+
+    #[test]
+    fn test_resolve_dependencies_service_not_found() {
+        let config = Config {
+            default: None,
+            services: HashMap::new(),
+        };
+
+        let result = resolve_dependencies(&config, &["nonexistent".to_string()]);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("not found in config")
+        );
+    }
+
+    #[test]
+    fn test_resolve_dependencies_dep_not_found() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["nonexistent".to_string()],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result = resolve_dependencies(&config, &["service1".to_string()]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_resolve_dependencies_multiple_targets() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["dep1".to_string()],
+            },
+        );
+        services.insert(
+            "service2".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["dep1".to_string()],
+            },
+        );
+        services.insert(
+            "dep1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec![],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result =
+            resolve_dependencies(&config, &["service1".to_string(), "service2".to_string()])
+                .unwrap();
+        assert!(result.contains(&"dep1".to_string()));
+        assert!(result.contains(&"service1".to_string()));
+        assert!(result.contains(&"service2".to_string()));
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_resolve_dependencies_diamond_graph() {
+        let mut services = HashMap::new();
+        services.insert(
+            "service1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["dep1".to_string(), "dep2".to_string()],
+            },
+        );
+        services.insert(
+            "dep1".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["base".to_string()],
+            },
+        );
+        services.insert(
+            "dep2".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["base".to_string()],
+            },
+        );
+        services.insert(
+            "base".to_string(),
+            crate::config::ServiceConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec![],
+            },
+        );
+
+        let config = Config {
+            default: None,
+            services,
+        };
+
+        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0], "base");
+        assert!(result.contains(&"dep1".to_string()));
+        assert!(result.contains(&"dep2".to_string()));
+        assert_eq!(result[3], "service1");
+    }
+}
+
 async fn start_services(
     config: &Config,
     services_list: &[String],

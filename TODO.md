@@ -3,6 +3,11 @@ TODO Format:
 - Unsolved items should be at the top of the file
 - Additional explanation can be added on subsequent lines with 6-space indentation
 
+[  ] Replace all python code with bash scripts if they are still needed. If
+     they are not needed, remove them. If the test_* scripts are still needed
+     they should reside in "tests/". Make sure all script names match the test
+     that they are used in.
+
  [ X ] 2 process tests are failing (test_continuous_output,
        test_scroll_with_continuous_output) due to architectural changes in
        process handling. Fixed by replacing oneshot channel with Arc<Mutex<Option>>>
@@ -16,25 +21,25 @@ TODO Format:
 
   [ X ] Test colored output from the child processes
 
- [   ] Add unit tests for ui.rs:
-       - ProcessStatus enum variants and behavior
-       - UiEvent enum variants
+  [ X ] Add unit tests for ui.rs:
+        - ProcessStatus enum variants and behavior
+        - UiEvent enum variants
 
- [   ] Add unit tests for panel.rs:
-       - StreamBuf::push method and line truncation at MAX_LINES
-       - Panel::new constructor
-       - StatusPanel::new constructor
-       - StatusPanel::update_entry method
-       - StatusPanel::update_exit_code method
-       - StatusPanel::update_entry_with_action method
+  [ X ] Add unit tests for panel.rs:
+        - StreamBuf::push method and line truncation at MAX_LINES
+        - Panel::new constructor
+        - StatusPanel::new constructor
+        - StatusPanel::update_entry method
+        - StatusPanel::update_exit_code method
+        - StatusPanel::update_entry_with_action method
 
- [   ] Add unit tests for signals.rs:
-       - terminate_child function with various signal scenarios
-       - wait_for_child_exit function
+  [ X ] Add unit tests for signals.rs:
+        - terminate_child function with various signal scenarios
+        - wait_for_child_exit function
 
- [   ] Add unit tests for app.rs:
-       - run function with different configurations
-       - run_with_input function for testing input handling
+  [ X ] Add unit tests for app.rs:
+        - visible_len function for panel display calculation
+        - resolve_dependencies function for dependency resolution
 
  [ X ] 'run' type services now appear in the status panel and are tracked
        correctly
