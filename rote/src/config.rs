@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn test_deserialize_example_yaml() {
         let config = load_config();
-        assert_eq!(config.default.as_deref(), Some("run"));
+        assert_eq!(config.default.as_deref(), Some("ping-demo"));
         let map = &config.services;
         assert_eq!(
             map["database"].action,
