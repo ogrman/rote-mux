@@ -309,12 +309,10 @@ pub async fn run_with_input(
             proc._stderr_task.abort();
         }
     }
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     if enable_terminal {
-        disable_raw_mode()?;
-        execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-        terminal.show_cursor()?;
+        let _ = execute!(io::stdout(), LeaveAlternateScreen);
+        let _ = disable_raw_mode();
     }
     Ok(())
 }
