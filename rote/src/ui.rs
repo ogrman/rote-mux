@@ -25,6 +25,7 @@ pub enum UiEvent {
     },
     SwitchPanel(usize),
     SwitchToStatus,
+    CheckStatus(Vec<ProcessStatus>),
     Scroll(i32),
     ToggleStdout,
     ToggleStderr,

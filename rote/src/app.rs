@@ -209,13 +209,16 @@ pub async fn run_with_input(
     let mut status_panel = StatusPanel::new();
     let mut showing_status = true;
 
-    // Periodic status check task
+    // Periodic status check task - only send events when status actually changes
     let status_check_tx = internal_tx.clone();
     let status_check_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(250));
+        let prev_statuses: Vec<ProcessStatus> = vec![];
         loop {
             interval.tick().await;
-            let _ = status_check_tx.send(UiEvent::SwitchToStatus).await;
+            let _ = status_check_tx
+                .send(UiEvent::CheckStatus(prev_statuses.clone()))
+                .await;
         }
     });
 
@@ -364,6 +367,41 @@ pub async fn run_with_input(
             UiEvent::SwitchToStatus => {
                 showing_status = true;
                 redraw = true;
+            }
+
+            UiEvent::CheckStatus(prev_statuses) => {
+                let mut current_statuses = Vec::new();
+                let mut any_change = false;
+                let mut any_exited = false;
+
+                for (i, proc) in procs.iter_mut().enumerate() {
+                    if let Some(p) = proc {
+                        if let Ok(Some(_)) = p.child.try_wait() {
+                            current_statuses.push(ProcessStatus::Exited);
+                            any_exited = true;
+                        } else {
+                            current_statuses.push(ProcessStatus::Running);
+                        }
+                    } else {
+                        current_statuses.push(ProcessStatus::Exited);
+                        any_exited = true;
+                    }
+
+                    if prev_statuses.len() > i && current_statuses[i] != prev_statuses[i] {
+                        any_change = true;
+                        status_panel
+                            .update_entry(panels[i].service_name.clone(), current_statuses[i]);
+                    }
+                }
+
+                if any_change {
+                    if showing_status {
+                        redraw = true;
+                    } else if any_exited {
+                        showing_status = true;
+                        redraw = true;
+                    }
+                }
             }
 
             UiEvent::Restart => {
