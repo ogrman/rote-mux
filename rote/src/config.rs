@@ -93,47 +93,26 @@ mod tests {
         assert_eq!(config.default.as_deref(), Some("ping-demo"));
         let map = &config.services;
         assert_eq!(
-            map["database"].action,
+            map["google-ping"].action,
             Some(ServiceAction::Start {
-                command: Cow::Borrowed("bash -c 'echo \"Database running\"; tail -f /dev/null'"),
+                command: Cow::Borrowed("ping google.com"),
             })
         );
-        assert_eq!(map["database"].display, Some(vec![]));
+        assert_eq!(map["google-ping"].display, None);
 
-        assert_eq!(map["frontend"].cwd.as_deref(), Some("frontend"));
         assert_eq!(
-            map["frontend"].action,
+            map["cloudflare-ping"].action,
             Some(ServiceAction::Start {
-                command: Cow::Borrowed("scripts/frontend.sh"),
+                command: Cow::Borrowed("ping 1.1.1.1"),
             }),
         );
-        assert_eq!(map["frontend"].display, Some(vec!["stderr".to_string()]));
-
-        assert_eq!(map["backend"].cwd.as_deref(), Some("backend"));
-        assert_eq!(
-            map["backend"].action,
-            Some(ServiceAction::Start {
-                command: Cow::Borrowed("scripts/backend.sh"),
-            }),
-        );
-        assert_eq!(
-            map["backend"].require,
-            vec!["database".to_string(), "setup".to_string()]
-        );
-        assert_eq!(map["backend"].display, None);
+        assert_eq!(map["cloudflare-ping"].display, None);
 
         assert_eq!(
-            map["setup"].action,
-            Some(ServiceAction::Run {
-                command: Cow::Borrowed("scripts/setup.sh"),
-            })
+            map["ping-demo"].require,
+            vec!["google-ping".to_string(), "cloudflare-ping".to_string()]
         );
-
-        assert!(map["run"].action.is_none());
-        assert_eq!(
-            map["run"].require,
-            vec!["backend".to_string(), "frontend".to_string()]
-        );
+        assert!(map["ping-demo"].action.is_none());
     }
 
     #[test]

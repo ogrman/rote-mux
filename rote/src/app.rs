@@ -49,39 +49,9 @@ pub async fn run_with_input(
 
     let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<UiEvent>(1024);
 
-    // If external receiver is provided, use it directly with keyboard task via select!
-    // Otherwise, just use keyboard task
-    let keyboard_task = if external_rx.is_none() {
-        let tx_kb = internal_tx.clone();
-        Some(tokio::spawn(async move {
-            loop {
-                if event::poll(Duration::from_millis(250)).unwrap() {
-                    if let Event::Key(k) = event::read().unwrap() {
-                        let ev = match k.code {
-                            KeyCode::Char('q') => UiEvent::Exit,
-                            KeyCode::Char('R') => UiEvent::Restart,
-                            KeyCode::Char('o') => UiEvent::ToggleStdout,
-                            KeyCode::Char('e') => UiEvent::ToggleStderr,
-                            KeyCode::Char(c @ '1'..='9') => {
-                                UiEvent::SwitchPanel((c as u8 - b'1') as usize)
-                            }
-                            KeyCode::Up => UiEvent::Scroll(-1),
-                            KeyCode::Down => UiEvent::Scroll(1),
-                            KeyCode::PageUp => UiEvent::Scroll(-20),
-                            KeyCode::PageDown => UiEvent::Scroll(20),
-                            _ => continue,
-                        };
-                        let _ = tx_kb.send(ev).await;
-                    }
-                }
-            }
-        }))
-    } else {
-        None
-    };
-
     // The sender to use for spawning processes - always internal_tx
     let tx = internal_tx.clone();
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(16);
 
     // Resolve which services to run
     let target_services = if services_to_run.is_empty() {
@@ -163,13 +133,14 @@ pub async fn run_with_input(
         &panels,
         &mut procs,
         tx.clone(),
+        &shutdown_tx,
     )
     .await?;
 
     let mut active = 0;
 
     // keyboard - spawn if we created internal_tx (i.e., no external input)
-    let _keyboard_task = if external_rx.is_none() {
+    let keyboard_task = if external_rx.is_none() {
         let tx_kb = tx.clone();
         Some(tokio::spawn(async move {
             loop {
@@ -303,11 +274,18 @@ pub async fn run_with_input(
                 panels[active].stdout.push("[restarting]");
                 panels[active].stderr.push("[restarting]");
                 let cwd = panels[active].cwd.as_deref();
-                procs[active] = Some(spawn_process(active, &panels[active].cmd, cwd, tx.clone()));
+                procs[active] = Some(spawn_process(
+                    active,
+                    &panels[active].cmd,
+                    cwd,
+                    tx.clone(),
+                    shutdown_tx.subscribe(),
+                ));
                 redraw = true;
             }
 
             UiEvent::Exit => {
+                let _ = shutdown_tx.send(());
                 for p in procs.iter_mut().flatten() {
                     terminate_child(&mut p.child).await;
                 }
@@ -324,6 +302,14 @@ pub async fn run_with_input(
             draw(&mut terminal, &panels[active])?;
         }
     }
+
+    for p in procs.iter() {
+        if let Some(proc) = p {
+            proc._stdout_task.abort();
+            proc._stderr_task.abort();
+        }
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
     if enable_terminal {
         disable_raw_mode()?;
@@ -464,6 +450,7 @@ async fn start_services(
     panels: &[Panel],
     procs: &mut Vec<Option<RunningProcess>>,
     tx: tokio::sync::mpsc::Sender<UiEvent>,
+    shutdown_tx: &tokio::sync::broadcast::Sender<()>,
 ) -> io::Result<()> {
     for service_name in services_list {
         let service_config = config.services.get(service_name).unwrap();
@@ -503,7 +490,13 @@ async fn start_services(
                 if let Some(&panel_idx) = service_to_panel.get(service_name) {
                     let panel = &panels[panel_idx];
                     let cwd = panel.cwd.as_deref();
-                    procs[panel_idx] = Some(spawn_process(panel_idx, &panel.cmd, cwd, tx.clone()));
+                    procs[panel_idx] = Some(spawn_process(
+                        panel_idx,
+                        &panel.cmd,
+                        cwd,
+                        tx.clone(),
+                        shutdown_tx.subscribe(),
+                    ));
                 }
             }
             None => {

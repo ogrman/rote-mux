@@ -1,5 +1,5 @@
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
 
 use rote::panel::{Panel, StreamKind};
@@ -63,9 +63,10 @@ async fn collect_output_events(
 #[tokio::test]
 async fn test_spawn_simple_process() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
     let cmd = vec!["echo".to_string(), "hello world".to_string()];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Wait for process to complete
     let status = timeout(Duration::from_secs(2), proc.child.wait())
@@ -84,12 +85,13 @@ async fn test_spawn_simple_process() {
 #[tokio::test]
 async fn test_capture_stdout_and_stderr() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Use our test script that outputs to both stdout and stderr
     let script_path = format!("{}/tests/data/echo_exit.sh", env!("CARGO_MANIFEST_DIR"));
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Wait for process to complete
     let status = timeout(Duration::from_secs(2), proc.child.wait())
@@ -112,13 +114,14 @@ async fn test_capture_stdout_and_stderr() {
 #[tokio::test]
 async fn test_multiple_panels() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Spawn two processes for different panels
     let cmd1 = vec!["echo".to_string(), "panel0".to_string()];
     let cmd2 = vec!["echo".to_string(), "panel1".to_string()];
 
-    let mut proc1 = spawn_process(0, &cmd1, None, tx.clone());
-    let mut proc2 = spawn_process(1, &cmd2, None, tx.clone());
+    let mut proc1 = spawn_process(0, &cmd1, None, tx.clone(), shutdown_tx.subscribe());
+    let mut proc2 = spawn_process(1, &cmd2, None, tx.clone(), shutdown_tx.subscribe());
 
     // Wait for both processes
     let _ = timeout(Duration::from_secs(2), proc1.child.wait()).await;
@@ -156,6 +159,7 @@ async fn test_multiple_panels() {
 #[tokio::test]
 async fn test_terminate_child_respects_sigint() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let script_path = format!(
         "{}/tests/data/respects_sigint.sh",
@@ -163,7 +167,7 @@ async fn test_terminate_child_respects_sigint() {
     );
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Give process time to start
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -201,6 +205,7 @@ async fn test_terminate_child_respects_sigint() {
 #[tokio::test]
 async fn test_terminate_child_escalates_to_sigterm() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let script_path = format!(
         "{}/tests/data/respects_sigterm.sh",
@@ -208,7 +213,7 @@ async fn test_terminate_child_escalates_to_sigterm() {
     );
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Give process time to start
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -250,6 +255,7 @@ async fn test_terminate_child_escalates_to_sigterm() {
 #[tokio::test]
 async fn test_terminate_child_escalates_to_sigkill() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let script_path = format!(
         "{}/tests/data/ignores_all_signals.sh",
@@ -257,7 +263,7 @@ async fn test_terminate_child_escalates_to_sigkill() {
     );
     let cmd = vec![script_path];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Give process time to start
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -303,10 +309,11 @@ async fn test_terminate_child_escalates_to_sigkill() {
 #[tokio::test]
 async fn test_process_exit_status() {
     let (tx, _rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Test successful exit
     let cmd = vec!["true".to_string()];
-    let mut proc = spawn_process(0, &cmd, None, tx.clone());
+    let mut proc = spawn_process(0, &cmd, None, tx.clone(), shutdown_tx.subscribe());
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
         .expect("Process timed out")
@@ -315,7 +322,13 @@ async fn test_process_exit_status() {
 
     // Test failed exit
     let cmd = vec!["false".to_string()];
-    let mut proc = spawn_process(0, &cmd, None, tx.clone());
+    let mut proc = spawn_process(
+        0,
+        &cmd,
+        None,
+        tx.clone(),
+        shutdown_tx.subscribe().resubscribe(),
+    );
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
         .expect("Process timed out")
@@ -326,10 +339,11 @@ async fn test_process_exit_status() {
 #[tokio::test]
 async fn test_long_running_process() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Start a process that sleeps for a while
     let cmd = vec!["sleep".to_string(), "0.5".to_string()];
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Verify process is still running
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -350,6 +364,7 @@ async fn test_long_running_process() {
 #[tokio::test]
 async fn test_process_with_args() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "printf".to_string(),
@@ -359,7 +374,7 @@ async fn test_process_with_args() {
         "arg3".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -376,6 +391,7 @@ async fn test_process_with_args() {
 #[tokio::test]
 async fn test_multiline_stdout() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Use a command that outputs multiple lines
     let cmd = vec![
@@ -384,7 +400,7 @@ async fn test_multiline_stdout() {
         "echo line1; echo line2; echo line3".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -403,6 +419,7 @@ async fn test_multiline_stdout() {
 #[tokio::test]
 async fn test_rapid_output() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Generate many lines quickly
     let cmd = vec![
@@ -411,7 +428,7 @@ async fn test_rapid_output() {
         "for i in {1..50}; do echo \"line $i\"; done".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -429,6 +446,7 @@ async fn test_rapid_output() {
 #[tokio::test]
 async fn test_interleaved_stdout_stderr() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Output to both stdout and stderr in sequence
     let cmd = vec![
@@ -437,7 +455,7 @@ async fn test_interleaved_stdout_stderr() {
         "echo out1; echo err1 >&2; echo out2; echo err2 >&2; echo out3".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -461,6 +479,7 @@ async fn test_interleaved_stdout_stderr() {
 #[tokio::test]
 async fn test_long_lines() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Create a very long line
     let long_str = "x".repeat(1000);
@@ -470,7 +489,7 @@ async fn test_long_lines() {
         format!("echo {}", long_str),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -487,6 +506,7 @@ async fn test_long_lines() {
 #[tokio::test]
 async fn test_empty_lines() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Output with empty lines
     let cmd = vec![
@@ -495,7 +515,7 @@ async fn test_empty_lines() {
         "echo line1; echo; echo line3; echo".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -515,6 +535,7 @@ async fn test_empty_lines() {
 #[tokio::test]
 async fn test_panel_stdout_buffer() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
@@ -530,7 +551,7 @@ async fn test_panel_stdout_buffer() {
         true, // show_stderr
     );
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -579,6 +600,7 @@ async fn test_panel_stdout_buffer() {
 #[tokio::test]
 async fn test_panel_stderr_buffer() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
@@ -594,7 +616,7 @@ async fn test_panel_stderr_buffer() {
         true, // show_stderr
     );
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -641,6 +663,7 @@ async fn test_panel_stderr_buffer() {
 #[tokio::test]
 async fn test_continuous_output() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Simulate a continuously outputting process like ping
     let cmd = vec![
@@ -649,7 +672,7 @@ async fn test_continuous_output() {
         "for i in 1 2 3 4 5; do echo \"output $i\"; sleep 0.05; done".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Don't wait for process to complete, but collect output as it comes
     let mut stdout_lines = Vec::new();
@@ -688,6 +711,7 @@ async fn test_continuous_output() {
 #[tokio::test]
 async fn test_visible_len_calculation() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
@@ -703,7 +727,7 @@ async fn test_visible_len_calculation() {
         false, // show_stderr
     );
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -756,6 +780,7 @@ async fn test_visible_len_calculation() {
 #[tokio::test]
 async fn test_scroll_with_continuous_output() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
@@ -771,7 +796,7 @@ async fn test_scroll_with_continuous_output() {
         true, // show_stderr
     );
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Simulate the scroll update logic from app.rs
     let mut scroll = 0;
@@ -828,6 +853,7 @@ async fn test_scroll_with_continuous_output() {
 #[tokio::test]
 async fn test_draw_logic_with_few_lines() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
@@ -837,7 +863,7 @@ async fn test_draw_logic_with_few_lines() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -903,6 +929,7 @@ async fn test_draw_logic_with_few_lines() {
 #[tokio::test]
 async fn test_draw_logic_with_many_lines() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
@@ -912,7 +939,7 @@ async fn test_draw_logic_with_many_lines() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -978,6 +1005,7 @@ async fn test_draw_logic_with_many_lines() {
 #[tokio::test]
 async fn test_toggle_stream_visibility() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
@@ -987,7 +1015,7 @@ async fn test_toggle_stream_visibility() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx);
+    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.child.wait())
         .await
@@ -1064,15 +1092,28 @@ async fn test_toggle_stream_visibility() {
 #[tokio::test]
 async fn test_terminate_multiple_processes() {
     let (tx, rx) = mpsc::channel::<UiEvent>(100);
+    let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     // Spawn multiple long-running processes
     let cmd1 = vec!["sleep".to_string(), "0.1".to_string()];
     let cmd2 = vec!["sleep".to_string(), "0.1".to_string()];
     let cmd3 = vec!["sleep".to_string(), "0.1".to_string()];
 
-    let mut proc1 = spawn_process(0, &cmd1, None, tx.clone());
-    let mut proc2 = spawn_process(1, &cmd2, None, tx.clone());
-    let mut proc3 = spawn_process(2, &cmd3, None, tx.clone());
+    let mut proc1 = spawn_process(0, &cmd1, None, tx.clone(), shutdown_tx.subscribe());
+    let mut proc2 = spawn_process(
+        1,
+        &cmd2,
+        None,
+        tx.clone(),
+        shutdown_tx.subscribe().resubscribe(),
+    );
+    let mut proc3 = spawn_process(
+        2,
+        &cmd3,
+        None,
+        tx.clone(),
+        shutdown_tx.subscribe().resubscribe(),
+    );
 
     // Give processes time to start
     tokio::time::sleep(Duration::from_millis(50)).await;

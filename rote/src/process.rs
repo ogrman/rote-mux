@@ -2,6 +2,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
     sync::mpsc,
+    task::JoinHandle,
 };
 
 use crate::panel::StreamKind;
@@ -9,6 +10,8 @@ use crate::ui::UiEvent;
 
 pub struct RunningProcess {
     pub child: Child,
+    pub _stdout_task: JoinHandle<()>,
+    pub _stderr_task: JoinHandle<()>,
 }
 
 pub fn spawn_process(
@@ -16,6 +19,7 @@ pub fn spawn_process(
     cmd: &[String],
     cwd: Option<&str>,
     tx: mpsc::Sender<UiEvent>,
+    shutdown_rx: tokio::sync::broadcast::Receiver<()>,
 ) -> RunningProcess {
     let mut command = Command::new(&cmd[0]);
     command
@@ -35,31 +39,65 @@ pub fn spawn_process(
     let tx_out = tx.clone();
     let tx_err = tx.clone();
 
-    tokio::spawn(async move {
-        let mut lines = stdout;
-        while let Ok(Some(line)) = lines.next_line().await {
-            let _ = tx_out
-                .send(UiEvent::Line {
-                    panel,
-                    stream: StreamKind::Stdout,
-                    text: line,
-                })
-                .await;
+    let stdout_task = tokio::spawn({
+        let mut rx = shutdown_rx.resubscribe();
+        async move {
+            let mut lines = stdout;
+            loop {
+                tokio::select! {
+                    result = lines.next_line() => {
+                        match result {
+                            Ok(Some(line)) => {
+                                let _ = tx_out
+                                    .send(UiEvent::Line {
+                                        panel,
+                                        stream: StreamKind::Stdout,
+                                        text: line,
+                                    })
+                                    .await;
+                            }
+                            _ => break,
+                        }
+                    }
+                    _ = rx.recv() => {
+                        break;
+                    }
+                }
+            }
         }
     });
 
-    tokio::spawn(async move {
-        let mut lines = stderr;
-        while let Ok(Some(line)) = lines.next_line().await {
-            let _ = tx_err
-                .send(UiEvent::Line {
-                    panel,
-                    stream: StreamKind::Stderr,
-                    text: line,
-                })
-                .await;
+    let stderr_task = tokio::spawn({
+        let mut rx = shutdown_rx.resubscribe();
+        async move {
+            let mut lines = stderr;
+            loop {
+                tokio::select! {
+                    result = lines.next_line() => {
+                        match result {
+                            Ok(Some(line)) => {
+                                let _ = tx_err
+                                    .send(UiEvent::Line {
+                                        panel,
+                                        stream: StreamKind::Stderr,
+                                        text: line,
+                                    })
+                                    .await;
+                            }
+                            _ => break,
+                        }
+                    }
+                    _ = rx.recv() => {
+                        break;
+                    }
+                }
+            }
         }
     });
 
-    RunningProcess { child }
+    RunningProcess {
+        child,
+        _stdout_task: stdout_task,
+        _stderr_task: stderr_task,
+    }
 }
