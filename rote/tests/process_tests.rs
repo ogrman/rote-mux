@@ -7,28 +7,6 @@ use rote::process::spawn_process;
 use rote::signals::terminate_child;
 use rote::ui::UiEvent;
 
-/// Helper to simulate visible_len calculation from app.rs
-fn visible_len(panel: &Panel) -> usize {
-    let mut n = 0;
-    if panel.show_stdout {
-        let lines = panel.stdout.rope.len_lines();
-        n += if lines > 0 {
-            lines.saturating_sub(1)
-        } else {
-            0
-        };
-    }
-    if panel.show_stderr {
-        let lines = panel.stderr.rope.len_lines();
-        n += if lines > 0 {
-            lines.saturating_sub(1)
-        } else {
-            0
-        };
-    }
-    n
-}
-
 /// Helper function to collect output events from a process
 async fn collect_output_events(
     mut rx: mpsc::Receiver<UiEvent>,
@@ -819,11 +797,10 @@ async fn test_visible_len_calculation() {
     assert_eq!(panel.stdout.rope.len_lines(), 4);
 
     // But visible_len should return 3 (the actual number of text lines)
-    assert_eq!(visible_len(&panel), 3);
+    assert_eq!(panel.visible_len(), 3);
 
     // When following, scroll should be set to visible_len - 1 = 2
-    // This means we start rendering from line index 2, which shows line3
-    let scroll = visible_len(&panel).saturating_sub(1);
+    let scroll = panel.visible_len().saturating_sub(1);
     assert_eq!(scroll, 2);
 
     // Verify we can access all lines
@@ -876,7 +853,7 @@ async fn test_scroll_with_continuous_output() {
                         }
 
                         if at_bottom {
-                            scroll = visible_len(&panel).saturating_sub(1);
+                            scroll = panel.visible_len().saturating_sub(1);
                         }
                     }
                     _ => {}
@@ -892,7 +869,7 @@ async fn test_scroll_with_continuous_output() {
     }
 
     // After 5 lines, visible_len should be 5
-    assert_eq!(visible_len(&panel), 5);
+    assert_eq!(panel.visible_len(), 5);
 
     // Scroll should be at the last line (4)
     assert_eq!(scroll, 4);
@@ -944,7 +921,7 @@ async fn test_draw_logic_with_few_lines() {
                     let at_bottom = follow;
                     panel.stdout.push(&text);
                     if at_bottom {
-                        scroll = visible_len(&panel).saturating_sub(1);
+                        scroll = panel.visible_len().saturating_sub(1);
                     }
                 }
             }
@@ -1020,7 +997,7 @@ async fn test_draw_logic_with_many_lines() {
                     let at_bottom = follow;
                     panel.stdout.push(&text);
                     if at_bottom {
-                        scroll = visible_len(&panel).saturating_sub(1);
+                        scroll = panel.visible_len().saturating_sub(1);
                     }
                 }
             }
@@ -1122,7 +1099,7 @@ async fn test_mixed_output_order_preservation() {
     assert_eq!(stderr_events, vec!["stderr1", "stderr2", "stderr3"]);
 
     // With both streams visible, total should be 6
-    assert_eq!(visible_len(&panel), 6);
+    assert_eq!(panel.visible_len(), 6);
 
     // Verify order in stdout buffer
     let stdout_lines: Vec<String> = panel.stdout.rope.lines().map(|l| l.to_string()).collect();
@@ -1138,11 +1115,11 @@ async fn test_mixed_output_order_preservation() {
 
     // Toggle stderr off - order of stdout should be preserved
     panel.show_stderr = false;
-    assert_eq!(visible_len(&panel), 3);
+    assert_eq!(panel.visible_len(), 3);
 
     // Toggle stderr back on - both should still be present in correct order
     panel.show_stderr = true;
-    assert_eq!(visible_len(&panel), 6);
+    assert_eq!(panel.visible_len(), 6);
     assert_eq!(stdout_lines[0], "stdout1\n");
     assert_eq!(stdout_lines[1], "stdout2\n");
     assert_eq!(stdout_lines[2], "stdout3\n");
@@ -1268,48 +1245,48 @@ async fn test_toggle_stream_visibility() {
     }
 
     // Verify initial state: only stdout shown
-    assert_eq!(visible_len(&panel), 2);
+    assert_eq!(panel.visible_len(), 2);
 
     // Toggle stderr on
     panel.show_stderr = true;
-    let max = visible_len(&panel).saturating_sub(1);
+    let max = panel.visible_len().saturating_sub(1);
     panel.scroll = max;
     panel.follow = true;
 
     // Now should show 4 lines (2 stdout + 2 stderr)
-    assert_eq!(visible_len(&panel), 4);
+    assert_eq!(panel.visible_len(), 4);
     assert_eq!(panel.scroll, 3, "Scroll should be at bottom");
     assert_eq!(panel.follow, true, "Should be following");
 
     // Toggle stderr off
     panel.show_stderr = false;
-    let max = visible_len(&panel).saturating_sub(1);
+    let max = panel.visible_len().saturating_sub(1);
     panel.scroll = panel.scroll.min(max);
     panel.follow = panel.scroll == max;
 
     // Back to 2 lines
-    assert_eq!(visible_len(&panel), 2);
+    assert_eq!(panel.visible_len(), 2);
     assert_eq!(panel.scroll, 1, "Scroll should be clamped to bottom");
     assert_eq!(panel.follow, true, "Should still be following");
 
     // Toggle stdout off
     panel.show_stdout = false;
-    let max = visible_len(&panel).saturating_sub(1);
+    let max = panel.visible_len().saturating_sub(1);
     panel.scroll = panel.scroll.min(max);
     panel.follow = panel.scroll == max;
 
     // No lines shown
-    assert_eq!(visible_len(&panel), 0);
+    assert_eq!(panel.visible_len(), 0);
     assert_eq!(panel.scroll, 0, "Scroll should be 0");
 
     // Toggle stdout back on
     panel.show_stdout = true;
-    let max = visible_len(&panel).saturating_sub(1);
+    let max = panel.visible_len().saturating_sub(1);
     panel.scroll = max;
     panel.follow = true;
 
     // Back to 2 lines, should be at bottom
-    assert_eq!(visible_len(&panel), 2);
+    assert_eq!(panel.visible_len(), 2);
     assert_eq!(panel.scroll, 1, "Scroll should be at bottom");
     assert_eq!(panel.follow, true, "Should be following");
 }

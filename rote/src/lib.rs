@@ -2,6 +2,7 @@ pub mod app;
 pub mod config;
 pub mod panel;
 pub mod process;
+pub mod render;
 pub mod signals;
 pub mod ui;
 

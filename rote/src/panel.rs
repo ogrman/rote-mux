@@ -66,6 +66,27 @@ impl Panel {
             process_status: None,
         }
     }
+
+    pub fn visible_len(&self) -> usize {
+        let mut n = 0;
+        if self.show_stdout {
+            let lines = self.stdout.rope.len_lines();
+            n += if lines > 0 {
+                lines.saturating_sub(1)
+            } else {
+                0
+            };
+        }
+        if self.show_stderr {
+            let lines = self.stderr.rope.len_lines();
+            n += if lines > 0 {
+                lines.saturating_sub(1)
+            } else {
+                0
+            };
+        }
+        n
+    }
 }
 
 #[derive(Default)]

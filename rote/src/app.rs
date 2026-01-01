@@ -10,18 +10,19 @@ use crossterm::{
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{
-    Terminal,
-    layout::{Alignment, Constraint},
-    prelude::CrosstermBackend,
-    style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
-};
+use ratatui::{Terminal, prelude::CrosstermBackend};
+
+const UI_EVENT_CHANNEL_SIZE: usize = 1024;
+const SHUTDOWN_CHANNEL_SIZE: usize = 16;
+const STATUS_CHECK_INTERVAL_MS: u64 = 250;
+const KEYBOARD_POLL_INTERVAL_MS: u64 = 250;
+const SHUTDOWN_CHECK_INTERVAL_MS: u64 = 100;
 
 use crate::{
     config::{Config, ServiceAction},
     panel::{Panel, StatusPanel, StreamKind},
     process::{RunningProcess, spawn_process},
+    render,
     signals::terminate_child,
     ui::{ProcessStatus, UiEvent},
 };
@@ -43,7 +44,7 @@ async fn wait_for_shutdown(
                     status_panel
                         .update_entry(panels[i].service_name.clone(), ProcessStatus::Exited);
                     if enable_terminal {
-                        draw_shutdown(terminal, status_panel)?;
+                        render::draw_shutdown(terminal, status_panel)?;
                     }
                 } else {
                     all_exited = false;
@@ -55,7 +56,7 @@ async fn wait_for_shutdown(
             return Ok(true);
         }
 
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(SHUTDOWN_CHECK_INTERVAL_MS)).await;
     }
 }
 
@@ -71,46 +72,6 @@ fn check_process_exited_by_pid(pid: Option<u32>) -> bool {
         Ok(_) => false,                 // Process still exists
         Err(_) => false,
     }
-}
-
-fn draw_shutdown(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    status_panel: &StatusPanel,
-) -> io::Result<()> {
-    terminal.draw(|f| {
-        let area = f.size();
-
-        let mut lines = vec![String::from("Shutting down...")];
-        lines.push(String::new());
-
-        for entry in &status_panel.entries {
-            let status_str = match (&entry.action_type, entry.status) {
-                (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
-                    if entry.exit_code.map_or(false, |c| c == 0) {
-                        "✓"
-                    } else {
-                        "✗"
-                    }
-                }
-                (_, ProcessStatus::Running) => "●",
-                (_, ProcessStatus::Exited) => "✓",
-            };
-            lines.push(format!("  {} {}", status_str, entry.service_name));
-        }
-
-        lines.push(String::new());
-        lines.push(String::from("Waiting for all processes to exit..."));
-
-        let text = lines.join("\n");
-        let widget = Paragraph::new(text).block(
-            Block::default()
-                .title("Shutdown Progress")
-                .borders(Borders::ALL),
-        );
-
-        f.render_widget(widget, area);
-    })?;
-    Ok(())
 }
 
 pub async fn run(
@@ -136,11 +97,12 @@ pub async fn run_with_input(
     let backend = CrosstermBackend::new(io::stdout());
     let mut terminal = Terminal::new(backend)?;
 
-    let (internal_tx, mut internal_rx) = tokio::sync::mpsc::channel::<UiEvent>(1024);
+    let (internal_tx, mut internal_rx) =
+        tokio::sync::mpsc::channel::<UiEvent>(UI_EVENT_CHANNEL_SIZE);
 
     // The sender to use for spawning processes - always internal_tx
     let tx = internal_tx.clone();
-    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(16);
+    let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(SHUTDOWN_CHANNEL_SIZE);
 
     // Resolve which services to run
     let target_services = if services_to_run.is_empty() {
@@ -254,9 +216,10 @@ pub async fn run_with_input(
     // Periodic status check task
     let status_check_tx = internal_tx.clone();
     let status_check_task = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_millis(250));
+        let mut interval = tokio::time::interval(Duration::from_millis(STATUS_CHECK_INTERVAL_MS));
         loop {
             interval.tick().await;
+            // Ignore send errors - if the channel is closed, we're shutting down
             let _ = status_check_tx.send(UiEvent::CheckStatus).await;
         }
     });
@@ -266,7 +229,7 @@ pub async fn run_with_input(
         let tx_kb = tx.clone();
         Some(tokio::spawn(async move {
             loop {
-                if event::poll(Duration::from_millis(250)).unwrap() {
+                if event::poll(Duration::from_millis(KEYBOARD_POLL_INTERVAL_MS)).unwrap() {
                     if let Event::Key(k) = event::read().unwrap() {
                         let ev = match k.code {
                             KeyCode::Char('q') => UiEvent::Exit,
@@ -283,6 +246,7 @@ pub async fn run_with_input(
                             KeyCode::PageDown => UiEvent::Scroll(20),
                             _ => continue,
                         };
+                        // Ignore send errors - if channel is closed, we're shutting down
                         let _ = tx_kb.send(ev).await;
                     }
                 }
@@ -293,9 +257,9 @@ pub async fn run_with_input(
     };
 
     if showing_status {
-        draw_status(&mut terminal, &panels, &status_panel)?;
+        render::draw_status(&mut terminal, &panels, &status_panel)?;
     } else {
-        draw(&mut terminal, &panels[active])?;
+        render::draw(&mut terminal, &panels[active])?;
     }
 
     loop {
@@ -328,7 +292,7 @@ pub async fn run_with_input(
                 }
 
                 if at_bottom {
-                    p.scroll = visible_len(p).saturating_sub(1);
+                    p.scroll = p.visible_len().saturating_sub(1);
                 }
 
                 if panel == active {
@@ -340,7 +304,6 @@ pub async fn run_with_input(
                 panel,
                 status,
                 exit_code,
-                title: _,
             } => {
                 let msg = format!(
                     "[exited: {}]",
@@ -354,7 +317,7 @@ pub async fn run_with_input(
 
             UiEvent::Scroll(delta) => {
                 let p = &mut panels[active];
-                let max = visible_len(p).saturating_sub(1);
+                let max = p.visible_len().saturating_sub(1);
                 let new = (p.scroll as i32 + delta).clamp(0, max as i32) as usize;
                 p.follow = new == max;
                 p.scroll = new;
@@ -364,30 +327,14 @@ pub async fn run_with_input(
             UiEvent::ToggleStdout => {
                 let p = &mut panels[active];
                 p.show_stdout = !p.show_stdout;
-                if p.show_stdout {
-                    let max = visible_len(p).saturating_sub(1);
-                    p.scroll = max;
-                    p.follow = true;
-                } else {
-                    let max = visible_len(p).saturating_sub(1);
-                    p.scroll = p.scroll.min(max);
-                    p.follow = p.scroll == max;
-                }
+                toggle_stream_visibility(p, p.show_stdout);
                 redraw = true;
             }
 
             UiEvent::ToggleStderr => {
                 let p = &mut panels[active];
                 p.show_stderr = !p.show_stderr;
-                if p.show_stderr {
-                    let max = visible_len(p).saturating_sub(1);
-                    p.scroll = max;
-                    p.follow = true;
-                } else {
-                    let max = visible_len(p).saturating_sub(1);
-                    p.scroll = p.scroll.min(max);
-                    p.follow = p.scroll == max;
-                }
+                toggle_stream_visibility(p, p.show_stderr);
                 redraw = true;
             }
 
@@ -468,6 +415,7 @@ pub async fn run_with_input(
             }
 
             UiEvent::Exit => {
+                // Ignore send errors - if all receivers are gone, shutdown proceeds anyway
                 let _ = shutdown_tx.send(());
 
                 // Initialize status panel with all running services
@@ -487,7 +435,7 @@ pub async fn run_with_input(
 
                 // Switch to showing shutdown progress
                 if enable_terminal {
-                    draw_shutdown(&mut terminal, &status_panel)?;
+                    render::draw_shutdown(&mut terminal, &status_panel)?;
                 }
 
                 // Wait for all processes to exit
@@ -516,9 +464,9 @@ pub async fn run_with_input(
 
         if redraw {
             if showing_status {
-                draw_status(&mut terminal, &panels, &status_panel)?;
+                render::draw_status(&mut terminal, &panels, &status_panel)?;
             } else {
-                draw(&mut terminal, &panels[active])?;
+                render::draw(&mut terminal, &panels[active])?;
             }
         }
     }
@@ -532,189 +480,23 @@ pub async fn run_with_input(
     }
 
     if enable_terminal {
+        // Ignore terminal cleanup errors - state may already be restored
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
     Ok(())
 }
 
-fn visible_len(p: &Panel) -> usize {
-    let mut n = 0;
-    if p.show_stdout {
-        // rope.len_lines() includes an extra empty line after the final newline,
-        // so we subtract 1 if there's any content, otherwise keep it at 0
-        let lines = p.stdout.rope.len_lines();
-        n += if lines > 0 {
-            lines.saturating_sub(1)
-        } else {
-            0
-        };
+fn toggle_stream_visibility(panel: &mut Panel, show: bool) {
+    if show {
+        let max = panel.visible_len().saturating_sub(1);
+        panel.scroll = max;
+        panel.follow = true;
+    } else {
+        let max = panel.visible_len().saturating_sub(1);
+        panel.scroll = panel.scroll.min(max);
+        panel.follow = panel.scroll == max;
     }
-    if p.show_stderr {
-        let lines = p.stderr.rope.len_lines();
-        n += if lines > 0 {
-            lines.saturating_sub(1)
-        } else {
-            0
-        };
-    }
-    n
-}
-
-fn draw_status(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    _panels: &[Panel],
-    status_panel: &StatusPanel,
-) -> io::Result<()> {
-    terminal.draw(|f| {
-        let area = f.size();
-
-        let chunks = ratatui::layout::Layout::default()
-            .direction(ratatui::layout::Direction::Vertical)
-            .margin(1)
-            .constraints(
-                [
-                    Constraint::Length(status_panel.entries.len() as u16 + 3),
-                    Constraint::Length(4),
-                ]
-                .as_ref(),
-            )
-            .split(area);
-
-        let table_area = chunks[0];
-        let help_area = chunks[1];
-
-        let header_style = Style::default()
-            .fg(Color::Reset)
-            .add_modifier(Modifier::BOLD);
-
-        let header = Row::new(vec![
-            Cell::from("#"),
-            Cell::from("Service").style(header_style),
-            Cell::from("Status").style(header_style),
-            Cell::from("Exit Code").style(header_style),
-        ])
-        .style(Style::default().bg(Color::Reset));
-
-        let rows: Vec<Row> = status_panel
-            .entries
-            .iter()
-            .enumerate()
-            .map(|(i, entry)| {
-                let (status_text, status_color) = match (&entry.action_type, entry.status) {
-                    (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
-                        if entry.exit_code.map_or(false, |c| c == 0) {
-                            ("✓ Completed", Color::Green)
-                        } else {
-                            ("✗ Failed", Color::Red)
-                        }
-                    }
-                    (Some(ServiceAction::Start { .. }), ProcessStatus::Running) => {
-                        ("● Running", Color::Green)
-                    }
-                    (Some(ServiceAction::Start { .. }), ProcessStatus::Exited) => {
-                        ("✓ Exited", Color::Gray)
-                    }
-                    (_, ProcessStatus::Running) => ("● Running", Color::Green),
-                    (_, ProcessStatus::Exited) => ("✓ Exited", Color::Gray),
-                };
-
-                let exit_code_text = match entry.status {
-                    ProcessStatus::Running => String::from("-"),
-                    ProcessStatus::Exited => entry
-                        .exit_code
-                        .map(|c| c.to_string())
-                        .unwrap_or_else(|| String::from("unknown")),
-                };
-
-                Row::new(vec![
-                    Cell::from((i + 1).to_string()),
-                    Cell::from(entry.service_name.clone()),
-                    Cell::from(status_text).style(Style::default().fg(status_color)),
-                    Cell::from(exit_code_text),
-                ])
-            })
-            .collect();
-
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(3),
-                Constraint::Min(30),
-                Constraint::Min(10),
-                Constraint::Min(10),
-            ],
-        )
-        .header(header)
-        .block(
-            Block::default()
-                .title("Process Status")
-                .borders(Borders::ALL),
-        );
-
-        f.render_widget(table, table_area);
-
-        let help_text = vec![
-            String::from("Press a number (1-9) to view a process"),
-            String::from("Press 's' to refresh this status screen"),
-            String::from("Press 'q' to quit"),
-        ]
-        .join("\n");
-
-        let help_widget = Paragraph::new(help_text)
-            .alignment(Alignment::Left)
-            .block(Block::default());
-
-        f.render_widget(help_widget, help_area);
-    })?;
-    Ok(())
-}
-
-fn draw(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, panel: &Panel) -> io::Result<()> {
-    terminal.draw(|f| {
-        let area = f.size();
-        let height = area.height.saturating_sub(2) as usize;
-
-        let mut lines = Vec::new();
-
-        if panel.show_stdout {
-            lines.extend(panel.stdout.rope.lines());
-        }
-        if panel.show_stderr {
-            lines.extend(panel.stderr.rope.lines());
-        }
-
-        // Skip trailing empty line if present
-        if let Some(last) = lines.last() {
-            if last.len_chars() == 0 {
-                lines.pop();
-            }
-        }
-
-        let start = panel
-            .scroll
-            .saturating_sub(height.saturating_sub(1))
-            .min(lines.len());
-        let end = (panel.scroll + 1).min(lines.len());
-        let text = lines[start..end]
-            .iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<String>>()
-            .join("");
-
-        let title = format!(
-            "{}  [o:{} e:{}]",
-            panel.title,
-            if panel.show_stdout { "on" } else { "off" },
-            if panel.show_stderr { "on" } else { "off" },
-        );
-
-        let widget =
-            Paragraph::new(text).block(Block::default().title(title).borders(Borders::ALL));
-
-        f.render_widget(widget, area);
-    })?;
-    Ok(())
 }
 
 fn resolve_dependencies(config: &Config, targets: &[String]) -> io::Result<Vec<String>> {
@@ -789,7 +571,7 @@ mod tests {
             false,
             false,
         );
-        assert_eq!(visible_len(&panel), 0);
+        assert_eq!(panel.visible_len(), 0);
     }
 
     #[test]
@@ -803,7 +585,7 @@ mod tests {
         );
         panel.stdout.push("line 1");
         panel.stdout.push("line 2");
-        assert_eq!(visible_len(&panel), 2);
+        assert_eq!(panel.visible_len(), 2);
     }
 
     #[test]
@@ -818,7 +600,7 @@ mod tests {
         panel.stderr.push("error 1");
         panel.stderr.push("error 2");
         panel.stderr.push("error 3");
-        assert_eq!(visible_len(&panel), 3);
+        assert_eq!(panel.visible_len(), 3);
     }
 
     #[test]
@@ -833,7 +615,7 @@ mod tests {
         panel.stdout.push("line 1");
         panel.stderr.push("error 1");
         panel.stdout.push("line 2");
-        assert_eq!(visible_len(&panel), 3);
+        assert_eq!(panel.visible_len(), 3);
     }
 
     #[test]

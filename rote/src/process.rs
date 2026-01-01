@@ -73,18 +73,19 @@ pub fn spawn_process(
             loop {
                 tokio::select! {
                     result = lines.next_line() => {
-                        match result {
-                            Ok(Some(line)) => {
-                                let _ = tx_out
-                                    .send(UiEvent::Line {
-                                        panel,
-                                        stream: StreamKind::Stdout,
-                                        text: line,
-                                    })
-                                    .await;
+                            match result {
+                                Ok(Some(line)) => {
+                                    // Ignore send errors - if channel is closed, we're shutting down
+                                    let _ = tx_out
+                                        .send(UiEvent::Line {
+                                            panel,
+                                            stream: StreamKind::Stdout,
+                                            text: line,
+                                        })
+                                        .await;
+                                }
+                                _ => break,
                             }
-                            _ => break,
-                        }
                     }
                     _ = rx.recv() => {
                         break;
@@ -103,6 +104,7 @@ pub fn spawn_process(
                     result = lines.next_line() => {
                         match result {
                             Ok(Some(line)) => {
+                                // Ignore send errors - if channel is closed, we're shutting down
                                 let _ = tx_err
                                     .send(UiEvent::Line {
                                         panel,
@@ -156,21 +158,21 @@ pub fn spawn_process(
             exit_done_clone.notify_one();
 
             if is_ok {
+                // Ignore send errors - if channel is closed, we're shutting down
                 let _ = exit_tx_ui
                     .send(UiEvent::Exited {
                         panel: panel_idx,
                         status: status.map(|s| s),
                         exit_code,
-                        title: String::new(),
                     })
                     .await;
             } else {
+                // Ignore send errors - if channel is closed, we're shutting down
                 let _ = exit_tx_ui
                     .send(UiEvent::Exited {
                         panel: panel_idx,
                         status: None,
                         exit_code: None,
-                        title: String::new(),
                     })
                     .await;
             }

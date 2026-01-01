@@ -18,7 +18,6 @@ pub enum UiEvent {
         panel: usize,
         status: Option<ExitStatus>,
         exit_code: Option<i32>,
-        title: String,
     },
     ProcessStatus {
         panel: usize,
@@ -100,7 +99,6 @@ mod tests {
             panel: 2,
             status: None,
             exit_code: Some(0),
-            title: String::from("test-service"),
         };
 
         match event {
@@ -108,12 +106,10 @@ mod tests {
                 panel,
                 status,
                 exit_code,
-                title,
             } => {
                 assert_eq!(panel, 2);
                 assert_eq!(status, None);
                 assert_eq!(exit_code, Some(0));
-                assert_eq!(title, "test-service");
             }
             _ => panic!("Expected UiEvent::Exited"),
         }
