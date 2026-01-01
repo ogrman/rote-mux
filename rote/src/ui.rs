@@ -1,7 +1,7 @@
 use crate::panel::StreamKind;
 use std::process::ExitStatus;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProcessStatus {
     Running,
     Exited,

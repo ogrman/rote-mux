@@ -80,6 +80,7 @@ pub struct StatusEntry {
     pub service_name: String,
     pub status: crate::ui::ProcessStatus,
     pub exit_code: Option<i32>,
+    pub action_type: Option<crate::config::ServiceAction>,
 }
 
 impl StatusPanel {
@@ -99,6 +100,7 @@ impl StatusPanel {
                 service_name,
                 status,
                 exit_code: None,
+                action_type: None,
             });
         }
     }
@@ -110,6 +112,29 @@ impl StatusPanel {
             .find(|e| e.service_name == service_name)
         {
             entry.exit_code = exit_code;
+        }
+    }
+
+    pub fn update_entry_with_action(
+        &mut self,
+        service_name: String,
+        status: crate::ui::ProcessStatus,
+        action_type: crate::config::ServiceAction,
+    ) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.service_name == service_name)
+        {
+            entry.status = status;
+            entry.action_type = Some(action_type);
+        } else {
+            self.entries.push(StatusEntry {
+                service_name,
+                status,
+                exit_code: None,
+                action_type: Some(action_type),
+            });
         }
     }
 }

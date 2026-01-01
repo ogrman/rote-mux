@@ -1,12 +1,11 @@
 Bugs:
 
-- When starting the root example.yaml file the "setup-task" service does not show up in the status page. I don't know if this is because it hasn't been started, or because it's simply not displayed
-
-- All services show as "exited" when starting the rote app with example.yaml. The ping tasks show "[exited: signal: 10 (SIGUSR1)]" and the short-running task doesn't show an exited message. The issue is that check_process_exited_by_pid() in app.rs and check_process_exited() in signals.rs use Signal::SIGUSR1 to check if a process exists, but this actually sends the signal to the process, causing it to exit.
+(none currently)
 
 Requested features:
 
 - The last exit code should be shown on the status page for both "run" and "start" type commands
+- "run" type tasks should show "Completed" or "Failed" in the status page depending on exit code. "start" type tasks should show "Running" or "Exited"
 
 Completed features:
 

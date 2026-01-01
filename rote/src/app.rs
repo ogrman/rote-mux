@@ -84,9 +84,16 @@ fn draw_shutdown(
         lines.push(String::new());
 
         for entry in &status_panel.entries {
-            let status_str = match entry.status {
-                ProcessStatus::Running => "●",
-                ProcessStatus::Exited => "✓",
+            let status_str = match (&entry.action_type, entry.status) {
+                (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
+                    if entry.exit_code.map_or(false, |c| c == 0) {
+                        "✓"
+                    } else {
+                        "✗"
+                    }
+                }
+                (_, ProcessStatus::Running) => "●",
+                (_, ProcessStatus::Exited) => "✓",
             };
             lines.push(format!("  {} {}", status_str, entry.service_name));
         }
@@ -163,7 +170,7 @@ pub async fn run_with_input(
 
         // Only create panels for services with a "start" action
         if let Some(ServiceAction::Start { command }) = &service_config.action {
-            let cmd = shell_words::split(&command).map_err(|e| {
+            let cmd = shell_words::split(&command.as_command()).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!("Failed to parse command: {}", e),
@@ -206,8 +213,27 @@ pub async fn run_with_input(
         return Ok(());
     }
 
-    // Start processes according to dependencies
+    // Initialize status panel with all services that have actions
     let mut status_panel = StatusPanel::new();
+    for service_name in &services_list {
+        let service_config = config.services.get(service_name).unwrap();
+
+        match &service_config.action {
+            Some(action) => {
+                status_panel.update_entry_with_action(
+                    service_name.clone(),
+                    ProcessStatus::Running,
+                    action.clone(),
+                );
+                status_panel
+                    .entry_indices
+                    .insert(service_name.clone(), usize::MAX);
+            }
+            None => {}
+        }
+    }
+
+    // Start processes according to dependencies
     let mut procs: Vec<Option<RunningProcess>> = (0..panels.len()).map(|_| None).collect();
     start_services(
         &config,
@@ -265,29 +291,6 @@ pub async fn run_with_input(
     } else {
         None
     };
-
-    // Initialize status panel with all services that have actions
-    for service_name in &services_list {
-        let service_config = config.services.get(service_name).unwrap();
-
-        match &service_config.action {
-            Some(ServiceAction::Run { .. }) => {
-                status_panel.update_entry(service_name.clone(), ProcessStatus::Running);
-                status_panel
-                    .entry_indices
-                    .insert(service_name.clone(), usize::MAX);
-            }
-            Some(ServiceAction::Start { .. }) => {
-                if let Some(&panel_idx) = service_to_panel.get(service_name) {
-                    status_panel.update_entry(service_name.clone(), ProcessStatus::Running);
-                    status_panel
-                        .entry_indices
-                        .insert(service_name.clone(), panel_idx);
-                }
-            }
-            None => {}
-        }
-    }
 
     if showing_status {
         draw_status(&mut terminal, &panels, &status_panel)?;
@@ -598,9 +601,22 @@ fn draw_status(
             .iter()
             .enumerate()
             .map(|(i, entry)| {
-                let (status_text, status_color) = match entry.status {
-                    ProcessStatus::Running => ("● Running", Color::Green),
-                    ProcessStatus::Exited => ("✓ Exited", Color::Gray),
+                let (status_text, status_color) = match (&entry.action_type, entry.status) {
+                    (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
+                        if entry.exit_code.map_or(false, |c| c == 0) {
+                            ("✓ Completed", Color::Green)
+                        } else {
+                            ("✗ Failed", Color::Red)
+                        }
+                    }
+                    (Some(ServiceAction::Start { .. }), ProcessStatus::Running) => {
+                        ("● Running", Color::Green)
+                    }
+                    (Some(ServiceAction::Start { .. }), ProcessStatus::Exited) => {
+                        ("✓ Exited", Color::Gray)
+                    }
+                    (_, ProcessStatus::Running) => ("● Running", Color::Green),
+                    (_, ProcessStatus::Exited) => ("✓ Exited", Color::Gray),
                 };
 
                 let exit_code_text = match entry.status {
@@ -771,7 +787,7 @@ async fn start_services(
         match &service_config.action {
             Some(ServiceAction::Run { command }) => {
                 // Run to completion
-                let cmd = shell_words::split(&command).map_err(|e| {
+                let cmd = shell_words::split(&command.as_command()).map_err(|e| {
                     io::Error::new(
                         io::ErrorKind::InvalidInput,
                         format!("Failed to parse command: {}", e),

@@ -33,17 +33,35 @@ pub struct ServiceConfiguration {
 /// a command to be executed. `run` is used for something that should run
 /// to completion before the service is considered ready, while `start` is used
 /// for long-running services. These are mutually exclusive.
-#[derive(Debug, Deserialize, PartialEq)]
+#[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum ServiceAction {
     Run {
         #[serde(rename = "run")]
-        command: Cow<'static, str>,
+        command: CommandValue,
     },
     Start {
         #[serde(rename = "start")]
-        command: Cow<'static, str>,
+        command: CommandValue,
     },
+}
+
+/// Represents a command value that can be either a string or a boolean.
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum CommandValue {
+    String(Cow<'static, str>),
+    Bool(bool),
+}
+
+impl CommandValue {
+    pub fn as_command(&self) -> Cow<'static, str> {
+        match self {
+            CommandValue::String(s) => s.clone(),
+            CommandValue::Bool(true) => Cow::Borrowed("true"),
+            CommandValue::Bool(false) => Cow::Borrowed("false"),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -68,7 +86,7 @@ mod tests {
             assert_eq!(
                 action,
                 ServiceAction::Run {
-                    command: Cow::Borrowed("echo 'Hello, World!'"),
+                    command: CommandValue::String(Cow::Borrowed("echo 'Hello, World!'")),
                 },
             );
         }
@@ -81,7 +99,7 @@ mod tests {
             assert_eq!(
                 action,
                 ServiceAction::Start {
-                    command: Cow::Borrowed("./start_service.sh"),
+                    command: CommandValue::String(Cow::Borrowed("./start_service.sh")),
                 }
             );
         }
@@ -95,7 +113,7 @@ mod tests {
         assert_eq!(
             map["google-ping"].action,
             Some(ServiceAction::Start {
-                command: Cow::Borrowed("ping google.com"),
+                command: CommandValue::String(Cow::Borrowed("ping google.com")),
             })
         );
         assert_eq!(map["google-ping"].display, None);
@@ -103,16 +121,28 @@ mod tests {
         assert_eq!(
             map["cloudflare-ping"].action,
             Some(ServiceAction::Start {
-                command: Cow::Borrowed("ping 1.1.1.1"),
+                command: CommandValue::String(Cow::Borrowed("ping 1.1.1.1")),
             }),
         );
         assert_eq!(map["cloudflare-ping"].display, None);
 
         assert_eq!(
             map["ping-demo"].require,
-            vec!["google-ping".to_string(), "cloudflare-ping".to_string()]
+            vec![
+                "google-ping".to_string(),
+                "cloudflare-ping".to_string(),
+                "short-lived".to_string()
+            ]
         );
         assert!(map["ping-demo"].action.is_none());
+
+        // Check setup-task service
+        assert_eq!(
+            map["setup-task"].action,
+            Some(ServiceAction::Run {
+                command: CommandValue::Bool(true),
+            })
+        );
     }
 
     #[test]
@@ -128,7 +158,7 @@ mod tests {
         assert_eq!(
             service.action,
             Some(ServiceAction::Run {
-                command: Cow::Borrowed("echo 'hi'"),
+                command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
         assert_eq!(service.cwd, None);
@@ -166,7 +196,7 @@ mod tests {
         assert_eq!(
             service.action,
             Some(ServiceAction::Run {
-                command: Cow::Borrowed("echo 'hi'"),
+                command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
     }
@@ -186,10 +216,52 @@ mod tests {
         assert_eq!(
             service.action,
             Some(ServiceAction::Run {
-                command: Cow::Borrowed("echo 'hi'"),
+                command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
         assert_eq!(service.display, Some(vec![]));
         assert_eq!(service.require, Vec::<String>::new());
+    }
+
+    #[test]
+    fn test_run_with_boolean_true() {
+        let yaml = r#"
+    default: service
+    services:
+      service:
+        run: true
+    "#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let service = &config.services["service"];
+        assert_eq!(
+            service.action,
+            Some(ServiceAction::Run {
+                command: CommandValue::Bool(true),
+            })
+        );
+        if let Some(ServiceAction::Run { command }) = &service.action {
+            assert_eq!(command.as_command(), Cow::Borrowed("true"));
+        }
+    }
+
+    #[test]
+    fn test_run_with_boolean_false() {
+        let yaml = r#"
+    default: service
+    services:
+      service:
+        run: false
+    "#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let service = &config.services["service"];
+        assert_eq!(
+            service.action,
+            Some(ServiceAction::Run {
+                command: CommandValue::Bool(false),
+            })
+        );
+        if let Some(ServiceAction::Run { command }) = &service.action {
+            assert_eq!(command.as_command(), Cow::Borrowed("false"));
+        }
     }
 }
