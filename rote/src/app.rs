@@ -209,6 +209,16 @@ pub async fn run_with_input(
     let mut status_panel = StatusPanel::new();
     let mut showing_status = true;
 
+    // Periodic status check task
+    let status_check_tx = internal_tx.clone();
+    let status_check_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(250));
+        loop {
+            interval.tick().await;
+            let _ = status_check_tx.send(UiEvent::SwitchToStatus).await;
+        }
+    });
+
     // keyboard - spawn if we created internal_tx (i.e., no external input)
     let keyboard_task = if external_rx.is_none() {
         let tx_kb = tx.clone();
@@ -409,6 +419,8 @@ pub async fn run_with_input(
                 if let Some(ref task) = keyboard_task {
                     task.abort();
                 }
+
+                status_check_task.abort();
 
                 if shutdown_complete {
                     break;

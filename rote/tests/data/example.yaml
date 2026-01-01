@@ -4,5 +4,7 @@ services:
     start: ping google.com
   cloudflare-ping:
     start: ping 1.1.1.1
+  short-lived:
+    start: bash -c 'echo "Starting short-lived service"; sleep 5; echo "Service exiting after 5 seconds"'
   ping-demo:
     require: [google-ping, cloudflare-ping]
