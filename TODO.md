@@ -3,10 +3,12 @@ TODO Format:
 - Unsolved items should be at the top of the file
 - Additional explanation can be added on subsequent lines with 6-space indentation
 
-[  ] Replace all python code with bash scripts if they are still needed. If
-     they are not needed, remove them. If the test_* scripts are still needed
-     they should reside in "tests/". Make sure all script names match the test
-     that they are used in.
+ [ X ] Replace all python code with bash scripts if they are still needed. If
+      they are not needed, remove them. If the test_* scripts are still needed
+      they should reside in "tests/". Make sure all script names match the test
+      that they are used in. Removed test_exit.py, test_exit2.py, test_exit3.py,
+      test_exit.sh, and test_yaml_parse.rs as they were not used in automated
+      tests.
 
  [ X ] 2 process tests are failing (test_continuous_output,
        test_scroll_with_continuous_output) due to architectural changes in
