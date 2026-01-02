@@ -337,7 +337,7 @@ pub async fn run_with_input(
                     .messages
                     .push(MessageKind::Status, &msg, timestamp.as_deref());
                 status_panel.update_exit_code(panels[panel].service_name.clone(), exit_code);
-                redraw = panel == active;
+                redraw = true;
             }
 
             UiEvent::Scroll(delta) => {
@@ -381,7 +381,6 @@ pub async fn run_with_input(
                 }
 
                 let mut any_change = false;
-                let mut any_exited = false;
 
                 for (i, proc) in procs.iter_mut().enumerate() {
                     let current_status = if let Some(p) = proc {
@@ -399,10 +398,6 @@ pub async fn run_with_input(
                         status_panel.update_entry(panels[i].service_name.clone(), current_status);
                     }
 
-                    if current_status == ProcessStatus::Exited {
-                        any_exited = true;
-                    }
-
                     if i >= prev_statuses.len() {
                         prev_statuses.push(current_status);
                     } else {
@@ -411,19 +406,7 @@ pub async fn run_with_input(
                 }
 
                 if any_change {
-                    if showing_status {
-                        redraw = true;
-                    } else if any_exited {
-                        // Add message to current panel explaining why we're switching
-                        let timestamp = format_timestamp(panels[active].timestamps);
-                        panels[active].messages.push(
-                            MessageKind::Status,
-                            "[switching to status panel: process exited]",
-                            timestamp.as_deref(),
-                        );
-                        showing_status = true;
-                        redraw = true;
-                    }
+                    redraw = true;
                 }
 
                 prev_statuses_storage = Some(prev_statuses);
@@ -432,7 +415,9 @@ pub async fn run_with_input(
             UiEvent::Restart => {
                 if let Some(proc) = procs[active].take() {
                     terminate_child(proc.pid).await;
+                    let _ = proc._wait_task.await;
                 }
+
                 status_panel.update_exit_code(panels[active].service_name.clone(), None);
                 let was_following = panels[active].follow;
                 let timestamp = format_timestamp(panels[active].timestamps);
@@ -446,6 +431,7 @@ pub async fn run_with_input(
                     panels[active].scroll = max_len - 1;
                 }
                 panels[active].follow = was_following;
+
                 let cwd = panels[active].cwd.as_deref();
                 procs[active] = Some(spawn_process(
                     active,
