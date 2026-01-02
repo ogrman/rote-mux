@@ -9,17 +9,30 @@ pub enum StreamKind {
     Stderr,
 }
 
-pub struct StreamBuf {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MessageKind {
+    Stdout,
+    Stderr,
+    Status,
+}
+
+pub struct MessageBuf {
     pub rope: Rope,
 }
 
-impl StreamBuf {
+impl MessageBuf {
     pub fn new() -> Self {
         Self { rope: Rope::new() }
     }
 
-    pub fn push(&mut self, line: &str) {
-        self.rope.insert(self.rope.len_chars(), line);
+    pub fn push(&mut self, kind: MessageKind, line: &str) {
+        let kind_byte = match kind {
+            MessageKind::Stdout => b'o',
+            MessageKind::Stderr => b'e',
+            MessageKind::Status => b's',
+        };
+        let encoded = format!("\x1E{}\x1F{}", kind_byte as char, line);
+        self.rope.insert(self.rope.len_chars(), &encoded);
         self.rope.insert(self.rope.len_chars(), "\n");
 
         let excess = self.rope.len_lines().saturating_sub(MAX_LINES);
@@ -28,6 +41,44 @@ impl StreamBuf {
             self.rope.remove(0..cut);
         }
     }
+
+    pub fn lines_filtered(
+        &self,
+        show_stdout: bool,
+        show_stderr: bool,
+        show_status: bool,
+    ) -> Vec<(MessageKind, String)> {
+        let mut result = Vec::new();
+        for line in self.rope.lines() {
+            let line_str = line.to_string();
+            if line_str.starts_with('\x1E') {
+                if let Some(rest) = line_str.strip_prefix('\x1E') {
+                    if let Some(kind_char) = rest.chars().next() {
+                        if let Some(content) = rest
+                            .strip_prefix(kind_char)
+                            .and_then(|s| s.strip_prefix('\x1F'))
+                        {
+                            let kind = match kind_char {
+                                'o' => MessageKind::Stdout,
+                                'e' => MessageKind::Stderr,
+                                's' => MessageKind::Status,
+                                _ => continue,
+                            };
+                            let should_include = match kind {
+                                MessageKind::Stdout => show_stdout,
+                                MessageKind::Stderr => show_stderr,
+                                MessageKind::Status => show_status,
+                            };
+                            if should_include {
+                                result.push((kind, content.trim_end_matches('\n').to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
 }
 
 pub struct Panel {
@@ -35,12 +86,12 @@ pub struct Panel {
     pub service_name: String,
     pub cmd: Vec<String>,
     pub cwd: Option<String>,
-    pub stdout: StreamBuf,
-    pub stderr: StreamBuf,
+    pub messages: MessageBuf,
     pub scroll: usize,
     pub follow: bool,
     pub show_stdout: bool,
     pub show_stderr: bool,
+    pub show_status: bool,
     pub process_status: Option<crate::ui::ProcessStatus>,
 }
 
@@ -57,35 +108,20 @@ impl Panel {
             service_name,
             cmd,
             cwd,
-            stdout: StreamBuf::new(),
-            stderr: StreamBuf::new(),
+            messages: MessageBuf::new(),
             scroll: 0,
             follow: true,
             show_stdout,
             show_stderr,
+            show_status: true,
             process_status: None,
         }
     }
 
     pub fn visible_len(&self) -> usize {
-        let mut n = 0;
-        if self.show_stdout {
-            let lines = self.stdout.rope.len_lines();
-            n += if lines > 0 {
-                lines.saturating_sub(1)
-            } else {
-                0
-            };
-        }
-        if self.show_stderr {
-            let lines = self.stderr.rope.len_lines();
-            n += if lines > 0 {
-                lines.saturating_sub(1)
-            } else {
-                0
-            };
-        }
-        n
+        self.messages
+            .lines_filtered(self.show_stdout, self.show_stderr, self.show_status)
+            .len()
     }
 }
 
@@ -179,26 +215,26 @@ mod tests {
     use crate::config::ServiceAction;
 
     #[test]
-    fn test_stream_buf_new() {
-        let buf = StreamBuf::new();
+    fn test_message_buf_new() {
+        let buf = MessageBuf::new();
         assert_eq!(buf.rope.len_lines(), 1);
         assert_eq!(buf.rope.len_chars(), 0);
     }
 
     #[test]
-    fn test_stream_buf_push_single_line() {
-        let mut buf = StreamBuf::new();
-        buf.push("test line");
+    fn test_message_buf_push_single_line() {
+        let mut buf = MessageBuf::new();
+        buf.push(MessageKind::Stdout, "test line");
         assert_eq!(buf.rope.len_lines(), 2);
         assert!(buf.rope.to_string().contains("test line"));
     }
 
     #[test]
-    fn test_stream_buf_push_multiple_lines() {
-        let mut buf = StreamBuf::new();
-        buf.push("line 1");
-        buf.push("line 2");
-        buf.push("line 3");
+    fn test_message_buf_push_multiple_lines() {
+        let mut buf = MessageBuf::new();
+        buf.push(MessageKind::Stdout, "line 1");
+        buf.push(MessageKind::Stderr, "line 2");
+        buf.push(MessageKind::Status, "line 3");
         assert_eq!(buf.rope.len_lines(), 4);
         let text = buf.rope.to_string();
         assert!(text.contains("line 1"));
@@ -207,12 +243,68 @@ mod tests {
     }
 
     #[test]
-    fn test_stream_buf_truncation() {
-        let mut buf = StreamBuf::new();
+    fn test_message_buf_truncation() {
+        let mut buf = MessageBuf::new();
         for i in 0..MAX_LINES + 100 {
-            buf.push(&format!("line {}", i));
+            buf.push(MessageKind::Stdout, &format!("line {}", i));
         }
         assert_eq!(buf.rope.len_lines(), MAX_LINES);
+    }
+
+    #[test]
+    fn test_message_buf_lines_filtered() {
+        let mut buf = MessageBuf::new();
+        buf.push(MessageKind::Stdout, "stdout line");
+        buf.push(MessageKind::Stderr, "stderr line");
+        buf.push(MessageKind::Status, "status line");
+
+        let lines = buf.lines_filtered(true, true, true);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].0, MessageKind::Stdout);
+        assert_eq!(lines[0].1, "stdout line");
+        assert_eq!(lines[1].0, MessageKind::Stderr);
+        assert_eq!(lines[1].1, "stderr line");
+        assert_eq!(lines[2].0, MessageKind::Status);
+        assert_eq!(lines[2].1, "status line");
+    }
+
+    #[test]
+    fn test_message_buf_lines_filtered_stdout_only() {
+        let mut buf = MessageBuf::new();
+        buf.push(MessageKind::Stdout, "stdout line");
+        buf.push(MessageKind::Stderr, "stderr line");
+        buf.push(MessageKind::Status, "status line");
+
+        let lines = buf.lines_filtered(true, false, false);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0, MessageKind::Stdout);
+        assert_eq!(lines[0].1, "stdout line");
+    }
+
+    #[test]
+    fn test_message_buf_lines_filtered_stderr_only() {
+        let mut buf = MessageBuf::new();
+        buf.push(MessageKind::Stdout, "stdout line");
+        buf.push(MessageKind::Stderr, "stderr line");
+        buf.push(MessageKind::Status, "status line");
+
+        let lines = buf.lines_filtered(false, true, false);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0, MessageKind::Stderr);
+        assert_eq!(lines[0].1, "stderr line");
+    }
+
+    #[test]
+    fn test_message_buf_lines_filtered_status_only() {
+        let mut buf = MessageBuf::new();
+        buf.push(MessageKind::Stdout, "stdout line");
+        buf.push(MessageKind::Stderr, "stderr line");
+        buf.push(MessageKind::Status, "status line");
+
+        let lines = buf.lines_filtered(false, false, true);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0, MessageKind::Status);
+        assert_eq!(lines[0].1, "status line");
     }
 
     #[test]
@@ -237,19 +329,47 @@ mod tests {
     }
 
     #[test]
-    fn test_panel_new_with_defaults() {
-        let panel = Panel::new(
-            "service".to_string(),
-            vec!["command".to_string()],
+    fn test_visible_len_only_stdout() {
+        let mut panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
             None,
-            false,
+            true,
             false,
         );
+        panel.messages.push(MessageKind::Stdout, "line 1");
+        panel.messages.push(MessageKind::Stdout, "line 2");
+        assert_eq!(panel.visible_len(), 2);
+    }
 
-        assert_eq!(panel.title, "service");
-        assert_eq!(panel.cwd, None);
-        assert!(!panel.show_stdout);
-        assert!(!panel.show_stderr);
+    #[test]
+    fn test_visible_len_only_stderr() {
+        let mut panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
+            None,
+            false,
+            true,
+        );
+        panel.messages.push(MessageKind::Stderr, "error 1");
+        panel.messages.push(MessageKind::Stderr, "error 2");
+        panel.messages.push(MessageKind::Stderr, "error 3");
+        assert_eq!(panel.visible_len(), 3);
+    }
+
+    #[test]
+    fn test_visible_len_both_streams() {
+        let mut panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
+            None,
+            true,
+            true,
+        );
+        panel.messages.push(MessageKind::Stdout, "line 1");
+        panel.messages.push(MessageKind::Stderr, "error 1");
+        panel.messages.push(MessageKind::Stdout, "line 2");
+        assert_eq!(panel.visible_len(), 3);
     }
 
     #[test]

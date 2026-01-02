@@ -208,30 +208,19 @@ pub fn draw(
         let area = f.size();
         let height = area.height.saturating_sub(2) as usize;
 
-        let mut lines = Vec::new();
-
-        if panel.show_stdout {
-            lines.extend(panel.stdout.rope.lines());
-        }
-        if panel.show_stderr {
-            lines.extend(panel.stderr.rope.lines());
-        }
-
-        // Skip trailing empty line if present
-        if let Some(last) = lines.last() {
-            if last.len_chars() == 0 {
-                lines.pop();
-            }
-        }
+        let filtered_lines =
+            panel
+                .messages
+                .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
 
         let start = panel
             .scroll
             .saturating_sub(height.saturating_sub(1))
-            .min(lines.len());
-        let end = (panel.scroll + 1).min(lines.len());
-        let text = lines[start..end]
+            .min(filtered_lines.len());
+        let end = (panel.scroll + 1).min(filtered_lines.len());
+        let text = filtered_lines[start..end]
             .iter()
-            .map(|line| line.to_string())
+            .map(|(_, line)| format!("{}\n", line))
             .collect::<Vec<String>>()
             .join("");
 

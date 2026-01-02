@@ -70,7 +70,7 @@ TODO Format:
  [ ] Keep panels for exited "run" type tasks around so their output can be
       viewed
 
-[ ] We still have a bug: the messages for processes exiting and restarting are
+ [X] We still have a bug: the messages for processes exiting and restarting are
     piling up at the end of each stream. This is wrong, and points to
     something being wrong with the data model. What we want to do is to change
     the data model while keeping ropey in place. All messages should go in one

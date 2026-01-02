@@ -20,7 +20,7 @@ const SHUTDOWN_CHECK_INTERVAL_MS: u64 = 100;
 
 use crate::{
     config::{Config, ServiceAction},
-    panel::{Panel, StatusPanel, StreamKind},
+    panel::{MessageKind, Panel, StatusPanel, StreamKind},
     process::{RunningProcess, spawn_process},
     render,
     signals::terminate_child,
@@ -288,10 +288,11 @@ pub async fn run_with_input(
                 let p = &mut panels[panel];
                 let at_bottom = p.follow;
 
-                match stream {
-                    StreamKind::Stdout => p.stdout.push(&text),
-                    StreamKind::Stderr => p.stderr.push(&text),
-                }
+                let kind = match stream {
+                    StreamKind::Stdout => MessageKind::Stdout,
+                    StreamKind::Stderr => MessageKind::Stderr,
+                };
+                p.messages.push(kind, &text);
 
                 if at_bottom {
                     p.scroll = p.visible_len().saturating_sub(1);
@@ -311,8 +312,7 @@ pub async fn run_with_input(
                     "[exited: {}]",
                     status.map(|s| s.to_string()).unwrap_or("unknown".into())
                 );
-                panels[panel].stdout.push(&msg);
-                panels[panel].stderr.push(&msg);
+                panels[panel].messages.push(MessageKind::Status, &msg);
                 status_panel.update_exit_code(panels[panel].service_name.clone(), exit_code);
                 redraw = panel == active;
             }
@@ -404,8 +404,9 @@ pub async fn run_with_input(
                     terminate_child(proc.pid).await;
                 }
                 let was_following = panels[active].follow;
-                panels[active].stdout.push("[restarting]");
-                panels[active].stderr.push("[restarting]");
+                panels[active]
+                    .messages
+                    .push(MessageKind::Status, "[restarting]");
                 let max_len = panels[active].visible_len();
                 if max_len > 0 && was_following {
                     panels[active].scroll = max_len - 1;
@@ -591,8 +592,8 @@ mod tests {
             true,
             false,
         );
-        panel.stdout.push("line 1");
-        panel.stdout.push("line 2");
+        panel.messages.push(MessageKind::Stdout, "line 1");
+        panel.messages.push(MessageKind::Stdout, "line 2");
         assert_eq!(panel.visible_len(), 2);
     }
 
@@ -605,9 +606,9 @@ mod tests {
             false,
             true,
         );
-        panel.stderr.push("error 1");
-        panel.stderr.push("error 2");
-        panel.stderr.push("error 3");
+        panel.messages.push(MessageKind::Stderr, "error 1");
+        panel.messages.push(MessageKind::Stderr, "error 2");
+        panel.messages.push(MessageKind::Stderr, "error 3");
         assert_eq!(panel.visible_len(), 3);
     }
 
@@ -620,9 +621,9 @@ mod tests {
             true,
             true,
         );
-        panel.stdout.push("line 1");
-        panel.stderr.push("error 1");
-        panel.stdout.push("line 2");
+        panel.messages.push(MessageKind::Stdout, "line 1");
+        panel.messages.push(MessageKind::Stderr, "error 1");
+        panel.messages.push(MessageKind::Stdout, "line 2");
         assert_eq!(panel.visible_len(), 3);
     }
 
