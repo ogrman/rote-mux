@@ -69,3 +69,29 @@ TODO Format:
 
  [ ] Keep panels for exited "run" type tasks around so their output can be
       viewed
+
+[ ] We still have a bug: the messages for processes exiting and restarting are
+    piling up at the end of each stream. This is wrong, and points to
+    something being wrong with the data model. What we want to do is to change
+    the data model while keeping ropey in place. All messages should go in one
+    stream and be tagged with the message type and contents so that they
+    always show up in chronological order regardless of toggling. Ropey just
+    stores bytes so we will need some way to encode the following in the
+    buffer:
+
+      - Stream type, one of:
+        - Line printed to stdout
+        - Line printed to stderr
+        - Status message such as restarted, exited (with exit code), started
+          again. Things related to the harness and not to the running
+          application.
+      - It is fine if the stream type is just a tag with a text message, it
+        doesn't need to be super structured.
+    
+    Investigate how we can store this data in ropey and encode/decode it in a
+    safe way while maintaining performance. Consider that I may want to add a
+    timestamp to this data in the future, so don't build something that makes
+    this hard to add.
+
+[ ] Add option to show timestamps for messages in the config format. When it
+    is enabled all logs should have the current time prepended to the line.
