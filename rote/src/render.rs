@@ -68,7 +68,7 @@ pub fn draw_status(
             .constraints(
                 [
                     Constraint::Min(0),
-                    Constraint::Length(1),
+                    Constraint::Length(3),
                     Constraint::Length(4),
                 ]
                 .as_ref(),
@@ -111,7 +111,8 @@ pub fn draw_status(
 
         let status_bar = Paragraph::new(status_text)
             .style(status_bar_style)
-            .alignment(Alignment::Right);
+            .alignment(Alignment::Right)
+            .block(Block::default().borders(Borders::ALL));
 
         f.render_widget(status_bar, status_bar_area);
 
@@ -249,7 +250,7 @@ pub fn draw(
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
-            .constraints([Constraint::Min(0), Constraint::Length(1)].as_ref())
+            .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
             .split(area);
 
         let content_area = chunks[0];
@@ -275,7 +276,8 @@ pub fn draw(
 
         let status_bar = Paragraph::new(status_text)
             .style(status_bar_style)
-            .alignment(Alignment::Right);
+            .alignment(Alignment::Right)
+            .block(Block::default().borders(Borders::ALL));
 
         f.render_widget(status_bar, status_bar_area);
 
