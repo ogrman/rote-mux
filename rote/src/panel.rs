@@ -102,6 +102,7 @@ pub struct StatusEntry {
     pub status: crate::ui::ProcessStatus,
     pub exit_code: Option<i32>,
     pub action_type: Option<crate::config::ServiceAction>,
+    pub dependencies: Vec<String>,
 }
 
 impl StatusPanel {
@@ -122,6 +123,7 @@ impl StatusPanel {
                 status,
                 exit_code: None,
                 action_type: None,
+                dependencies: Vec::new(),
             });
         }
     }
@@ -155,7 +157,18 @@ impl StatusPanel {
                 status,
                 exit_code: None,
                 action_type: Some(action_type),
+                dependencies: Vec::new(),
             });
+        }
+    }
+
+    pub fn update_dependencies(&mut self, service_name: String, dependencies: Vec<String>) {
+        if let Some(entry) = self
+            .entries
+            .iter_mut()
+            .find(|e| e.service_name == service_name)
+        {
+            entry.dependencies = dependencies;
         }
     }
 }
@@ -357,6 +370,7 @@ mod tests {
             status: crate::ui::ProcessStatus::Running,
             exit_code: None,
             action_type: None,
+            dependencies: Vec::new(),
         };
         let cloned = entry.clone();
         assert_eq!(entry.service_name, cloned.service_name);
@@ -373,5 +387,36 @@ mod tests {
         assert_eq!(panel.entries.len(), 2);
         assert!(panel.entries.iter().any(|e| e.service_name == "service1"));
         assert!(panel.entries.iter().any(|e| e.service_name == "service2"));
+    }
+
+    #[test]
+    fn test_status_panel_update_dependencies() {
+        let mut panel = StatusPanel::new();
+        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_dependencies(
+            "service1".to_string(),
+            vec!["dep1".to_string(), "dep2".to_string()],
+        );
+
+        let entry = panel
+            .entries
+            .iter()
+            .find(|e| e.service_name == "service1")
+            .unwrap();
+        assert_eq!(entry.dependencies, vec!["dep1", "dep2"]);
+    }
+
+    #[test]
+    fn test_status_panel_update_dependencies_empty() {
+        let mut panel = StatusPanel::new();
+        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_dependencies("service1".to_string(), vec![]);
+
+        let entry = panel
+            .entries
+            .iter()
+            .find(|e| e.service_name == "service1")
+            .unwrap();
+        assert!(entry.dependencies.is_empty());
     }
 }

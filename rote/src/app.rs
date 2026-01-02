@@ -190,6 +190,8 @@ pub async fn run_with_input(
                 status_panel
                     .entry_indices
                     .insert(service_name.clone(), usize::MAX);
+                status_panel
+                    .update_dependencies(service_name.clone(), service_config.require.clone());
             }
             None => {}
         }
@@ -233,7 +235,7 @@ pub async fn run_with_input(
                     if let Event::Key(k) = event::read().unwrap() {
                         let ev = match k.code {
                             KeyCode::Char('q') => UiEvent::Exit,
-                            KeyCode::Char('R') => UiEvent::Restart,
+                            KeyCode::Char('r') => UiEvent::Restart,
                             KeyCode::Char('o') => UiEvent::ToggleStdout,
                             KeyCode::Char('e') => UiEvent::ToggleStderr,
                             KeyCode::Char('s') => UiEvent::SwitchToStatus,

@@ -3,6 +3,7 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout},
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style},
+    text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table},
 };
 use std::io;
@@ -85,6 +86,7 @@ pub fn draw_status(
             Cell::from("Service").style(header_style),
             Cell::from("Status").style(header_style),
             Cell::from("Exit Code").style(header_style),
+            Cell::from("Dependencies").style(header_style),
         ])
         .style(Style::default().bg(Color::Reset));
 
@@ -119,11 +121,45 @@ pub fn draw_status(
                         .unwrap_or_else(|| String::from("unknown")),
                 };
 
+                let dependencies_cell = if entry.dependencies.is_empty() {
+                    Cell::from(String::new())
+                } else {
+                    let mut spans = Vec::new();
+                    for (j, dep) in entry.dependencies.iter().enumerate() {
+                        if j > 0 {
+                            spans.push(Span::from(", "));
+                        }
+                        let dep_status =
+                            status_panel.entries.iter().find(|e| e.service_name == *dep);
+                        let is_down_or_failed = match dep_status {
+                            Some(dep_entry) => match (&dep_entry.action_type, dep_entry.status) {
+                                (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
+                                    !dep_entry.exit_code.map_or(false, |c| c == 0)
+                                }
+                                (Some(ServiceAction::Start { .. }), ProcessStatus::Exited) => true,
+                                (_, ProcessStatus::Exited) => true,
+                                _ => false,
+                            },
+                            None => true,
+                        };
+                        spans.push(Span::styled(
+                            dep.clone(),
+                            if is_down_or_failed {
+                                Style::default().fg(Color::Red)
+                            } else {
+                                Style::default()
+                            },
+                        ));
+                    }
+                    Cell::from(Line::from(spans))
+                };
+
                 Row::new(vec![
                     Cell::from((i + 1).to_string()),
                     Cell::from(entry.service_name.clone()),
                     Cell::from(status_text).style(Style::default().fg(status_color)),
                     Cell::from(exit_code_text),
+                    dependencies_cell,
                 ])
             })
             .collect();
@@ -135,6 +171,7 @@ pub fn draw_status(
                 Constraint::Min(30),
                 Constraint::Min(10),
                 Constraint::Min(10),
+                Constraint::Min(20),
             ],
         )
         .header(header)
@@ -148,6 +185,7 @@ pub fn draw_status(
 
         let help_text = vec![
             String::from("Press a number (1-9) to view a process"),
+            String::from("Press 'r' to restart the current process"),
             String::from("Press 's' to refresh this status screen"),
             String::from("Press 'q' to quit"),
         ]

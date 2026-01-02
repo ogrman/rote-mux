@@ -128,7 +128,7 @@ Services are started in topological order based on their dependencies. Circular 
 When running, the following keyboard shortcuts are available:
 
 - `q`: Quit and terminate all processes
-- `R`: Restart the currently active process
+- `r`: Restart the currently active process
 - `o`: Toggle stdout visibility for the active panel
 - `e`: Toggle stderr visibility for the active panel
 - `s`: Switch to status panel showing all services
