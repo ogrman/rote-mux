@@ -1,17 +1,20 @@
 # Rote
 
-A terminal multiplexer for monitoring and managing multiple processes together, similar to docker-compose but without requiring Docker.
+A terminal multiplexer for monitoring and managing multiple processes together.
 
 ## Features
 
-- **Process Management**: Start and monitor multiple processes simultaneously
-- **TUI Interface**: Clean terminal UI with separate panels for each process
-- **Real-time Output**: View stdout and stderr from all processes in real-time
-- **Smart Signal Handling**: Graceful shutdown with signal escalation (SIGINT → SIGTERM → SIGKILL)
-- **YAML Configuration**: Define services and dependencies in a simple config file
-- **Process Restart**: Restart individual processes on the fly
-- **Scrollable Output**: Navigate through process output with keyboard controls
-- **Stream Filtering**: Toggle stdout/stderr visibility per panel
+- Process Management: Start and monitor multiple processes simultaneously
+- TUI Interface: Clean terminal UI with separate panels for each process
+- Real-time Output: View stdout and stderr from all processes in real-time
+- Smart Signal Handling: Graceful shutdown with signal escalation (SIGINT → SIGTERM → SIGKILL)
+- YAML Configuration: Define services and dependencies in a simple config file
+- Process Restart: Restart individual processes on the fly
+- Scrollable Output: Navigate through process output with keyboard controls
+- Stream Filtering: Toggle stdout/stderr visibility per panel
+- Status Panel: View the status of all services at a glance
+- Service Dependencies: Services can require other services to start first
+- Automatic Line Limits: Maximum 5,000 lines per stream to prevent memory issues
 
 ## Installation
 
@@ -27,38 +30,17 @@ cargo build --release
 
 ## Quick Start
 
-### Interactive Demo
-
-Run the built-in demo to see rote in action:
-
-```bash
-cargo run
-```
-
-This will start two ping processes (one to google.com, one to 1.1.1.1) in a split view.
-
-### Using a Configuration File
-
 Create a `rote.yaml` file:
 
 ```yaml
-default: run
+default: ping-demo
 services:
-  database:
-    start: bash -c 'echo "Database running"; tail -f /dev/null'
-    display: []
-  frontend:
-    cwd: frontend
-    start: npm run dev
-    display: [stderr]
-  backend:
-    cwd: backend
-    start: cargo run
-    require: [database, setup]
-  setup:
-    run: npm install
-  run:
-    require: [backend, frontend]
+  google-ping:
+    start: ping google.com
+  cloudflare-ping:
+    start: ping 1.1.1.1
+  ping-demo:
+    require: [google-ping, cloudflare-ping]
 ```
 
 Then run:
@@ -69,20 +51,25 @@ rote
 
 ## Configuration
 
+### Top-Level Fields
+
+- `default` (optional): The default service to run when none is specified
+- `services`: A mapping of service names to their configurations
+
 ### Service Definition
 
 Each service can have the following properties:
 
-- **`start`**: Command to start a long-running service
-- **`run`**: Command to run to completion (blocks dependent services until complete)
-- **`cwd`**: Working directory for the command (relative to the config file)
-- **`display`**: List of streams to display (`["stdout"]`, `["stderr"]`, or both by default)
-- **`require`**: List of services that must start before this one
+- `start`: Command to start a long-running service
+- `run`: Command to run to completion (blocks dependent services until complete)
+- `cwd` (optional): Working directory for the command (relative to the config file)
+- `display` (optional): List of streams to display (["stdout"], ["stderr"], or both by default)
+- `require` (optional): List of services that must be started before this one
 
 ### Actions: `start` vs `run`
 
-- **`start`**: For long-running processes (servers, daemons)
-- **`run`**: For one-time setup tasks (migrations, installations)
+- `start`: For long-running processes (servers, daemons). These are spawned in the background and their output is displayed in a panel.
+- `run`: For one-time setup tasks (migrations, installations). These run to completion before dependent services start. They do not create a panel.
 
 These are mutually exclusive - a service can only have one or the other.
 
@@ -94,55 +81,70 @@ services:
   # One-time setup
   install:
     run: npm install
-  
+
   # Database
   postgres:
     start: docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres
     display: [stderr]
-  
+
   # Run migrations after DB is ready
   migrate:
     run: alembic upgrade head
     require: [postgres, install]
-  
+
   # Backend server
   api:
     cwd: backend
     start: npm run start
     require: [migrate]
-  
+
   # Frontend dev server
   web:
     cwd: frontend
     start: npm run dev
     require: [install]
-  
+
   # Development target
   dev:
     require: [api, web]
 ```
 
-## Keyboard Controls
+### Display Streams
+
+The `display` field controls which streams are shown for a service:
+
+- Omit or `null`: Show both stdout and stderr (default)
+- `["stdout"]`: Show only stdout
+- `["stderr"]`: Show only stderr
+- `[]`: Hide all output
+- `["stdout", "stderr"]`: Show both streams (same as default)
+
+### Dependency Resolution
+
+Services are started in topological order based on their dependencies. Circular dependencies are detected and will cause an error. Services with a `run` action must complete successfully before dependent services start.
+
+## Key Bindings
 
 When running, the following keyboard shortcuts are available:
 
-- **`q`**: Quit and terminate all processes
-- **`R`**: Restart the currently active process
-- **`o`**: Toggle stdout visibility for the active panel
-- **`e`**: Toggle stderr visibility for the active panel
-- **`1-9`**: Switch to panel 1-9
-- **`↑/↓`**: Scroll up/down one line
-- **`PgUp/PgDn`**: Scroll up/down 20 lines
+- `q`: Quit and terminate all processes
+- `R`: Restart the currently active process
+- `o`: Toggle stdout visibility for the active panel
+- `e`: Toggle stderr visibility for the active panel
+- `s`: Switch to status panel showing all services
+- `1-9`: Switch to panel 1-9
+- `↑/↓`: Scroll up/down one line
+- `PgUp/PgDn`: Scroll up/down 20 lines
 
 ## Process Termination
 
 Rote handles process shutdown gracefully with signal escalation:
 
-1. **SIGINT** is sent first (Ctrl+C equivalent)
+1. SIGINT is sent first (Ctrl+C equivalent)
    - Wait 300ms for graceful shutdown
-2. **SIGTERM** is sent if process doesn't exit
+2. SIGTERM is sent if process doesn't exit
    - Wait another 300ms
-3. **SIGKILL** is sent as a last resort
+3. SIGKILL is sent as a last resort
    - Force terminates the process
 
 This ensures processes have an opportunity to clean up resources before being forcefully killed.
@@ -151,10 +153,10 @@ This ensures processes have an opportunity to clean up resources before being fo
 
 Rote is built with Rust and uses:
 
-- **Tokio**: Async runtime for process management
-- **Ratatui**: Terminal UI framework
-- **Ropey**: Efficient text rope for storing process output
-- **Crossterm**: Cross-platform terminal manipulation
+- Tokio: Async runtime for process management
+- Ratatui: Terminal UI framework
+- Ropey: Efficient text rope for storing process output
+- Crossterm: Cross-platform terminal manipulation
 
 The architecture features:
 
@@ -179,6 +181,7 @@ cargo test -- --nocapture
 ```
 
 Test coverage includes:
+
 - Basic process spawning and output capture
 - Multi-panel management
 - Signal escalation (SIGINT → SIGTERM → SIGKILL)
@@ -198,10 +201,12 @@ rote/
 │   ├── process.rs   # Process spawning and management
 │   ├── signals.rs   # Signal handling and escalation
 │   ├── ui.rs        # UI event definitions
+│   ├── render.rs    # UI rendering
 │   └── bin/
 │       └── rote.rs  # CLI entry point
 └── tests/
     ├── process_tests.rs  # Process management tests
+    ├── integration_test.rs  # Integration tests
     └── data/             # Test scripts and fixtures
 ```
 
@@ -226,45 +231,7 @@ cargo clippy
 
 ## Use Cases
 
-- **Development Environments**: Replace docker-compose for local development
-- **Service Orchestration**: Manage microservices during development
-- **Build Pipelines**: Run and monitor multiple build steps
-- **System Administration**: Monitor multiple long-running services
-- **Testing**: Run integration tests with multiple service dependencies
-
-## Comparison with Similar Tools
-
-| Feature | Rote | docker-compose | tmux | pm2 |
-|---------|------|----------------|------|-----|
-| No Docker required | Yes | No | Yes | Yes |
-| Real-time TUI | Yes | No | Partial | No |
-| Service dependencies | Yes | Yes | No | Partial |
-| YAML configuration | Yes | Yes | No | Yes |
-| Signal escalation | Yes | Partial | No | Yes |
-| Per-process scrollback | Yes | No | Yes | Partial |
-| Single binary | Yes | No | Yes | No |
-
-## Roadmap
-
-Future enhancements planned:
-
-- [ ] Full config file integration (currently hardcoded demo)
-- [ ] Process dependency resolution
-- [ ] Color-coded output per process
-- [ ] Log file output
-- [ ] Process auto-restart on failure
-- [ ] Resource usage monitoring (CPU/memory)
-- [ ] Search within output
-- [ ] Export output history
-
-## License
-
-[Add your license here]
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Author
-
-[Add your name/info here]
+- Development Environments: Manage multiple services during local development
+- Service Orchestration: Manage microservices during development
+- System Administration: Monitor multiple long-running services
+- Testing: Run integration tests with multiple service dependencies

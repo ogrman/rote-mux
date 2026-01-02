@@ -5,6 +5,8 @@ use std::path::PathBuf;
 
 use rote::Config;
 
+const EXAMPLE_YAML: &str = include_str!("../../tests/data/example.yaml");
+
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
@@ -17,11 +19,19 @@ struct Args {
     /// no services will be run.
     #[arg(value_name = "SERVICE", required = false)]
     services: Vec<String>,
+    /// Print an example configuration file to stdout and exit.
+    #[arg(long)]
+    generate_example: bool,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
+
+    if args.generate_example {
+        println!("{}", EXAMPLE_YAML);
+        return Ok(());
+    }
 
     let config_path = if let Some(config) = args.config {
         PathBuf::from(config)
