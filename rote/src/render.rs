@@ -69,7 +69,7 @@ pub fn draw_status(
                 [
                     Constraint::Min(0),
                     Constraint::Length(3),
-                    Constraint::Length(4),
+                    Constraint::Length(6),
                 ]
                 .as_ref(),
             )
@@ -112,7 +112,7 @@ pub fn draw_status(
         let status_bar = Paragraph::new(status_text)
             .style(status_bar_style)
             .alignment(Alignment::Right)
-            .block(Block::default().borders(Borders::ALL));
+            .block(Block::default().title("Status").borders(Borders::ALL));
 
         f.render_widget(status_bar, status_bar_area);
 
@@ -224,15 +224,15 @@ pub fn draw_status(
 
         let help_text = vec![
             String::from("Press a number (1-9) to view a process"),
-            String::from("Press 'r' to restart the current process"),
-            String::from("Press 's' to refresh this status screen"),
+            String::from("Press 's' to move to service overview"),
+            String::from("Press 'r' to restart current process"),
             String::from("Press 'q' to quit"),
         ]
         .join("\n");
 
         let help_widget = Paragraph::new(help_text)
             .alignment(Alignment::Left)
-            .block(Block::default());
+            .block(Block::default().title("Key Bindings").borders(Borders::ALL));
 
         f.render_widget(help_widget, help_area);
     })?;
@@ -277,7 +277,7 @@ pub fn draw(
         let status_bar = Paragraph::new(status_text)
             .style(status_bar_style)
             .alignment(Alignment::Right)
-            .block(Block::default().borders(Borders::ALL));
+            .block(Block::default().title("Status").borders(Borders::ALL));
 
         f.render_widget(status_bar, status_bar_area);
 
