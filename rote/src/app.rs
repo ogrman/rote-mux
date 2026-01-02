@@ -280,7 +280,7 @@ pub async fn run_with_input(
     if showing_status {
         render::draw_status(&mut terminal, &panels, &status_panel)?;
     } else {
-        render::draw(&mut terminal, &panels[active])?;
+        render::draw(&mut terminal, &panels[active], &status_panel)?;
     }
 
     loop {
@@ -508,7 +508,7 @@ pub async fn run_with_input(
             if showing_status {
                 render::draw_status(&mut terminal, &panels, &status_panel)?;
             } else {
-                render::draw(&mut terminal, &panels[active])?;
+                render::draw(&mut terminal, &panels[active], &status_panel)?;
             }
         }
     }

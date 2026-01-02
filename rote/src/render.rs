@@ -64,18 +64,56 @@ pub fn draw_status(
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .margin(1)
+            .margin(0)
             .constraints(
                 [
-                    Constraint::Length(status_panel.entries.len() as u16 + 3),
+                    Constraint::Min(0),
+                    Constraint::Length(1),
                     Constraint::Length(4),
                 ]
                 .as_ref(),
             )
             .split(area);
 
-        let table_area = chunks[0];
-        let help_area = chunks[1];
+        let inner_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints(
+                [
+                    Constraint::Length(status_panel.entries.len() as u16 + 3),
+                    Constraint::Min(0),
+                ]
+                .as_ref(),
+            )
+            .split(chunks[0]);
+
+        let table_area = inner_chunks[0];
+        let status_bar_area = chunks[1];
+        let help_area = chunks[2];
+
+        let (healthy, total, has_issues) = status_panel.get_health_status();
+        let status_text = if total > 0 {
+            format!(
+                " {} {}/{}",
+                if has_issues { "⚠" } else { "✓" },
+                healthy,
+                total
+            )
+        } else {
+            String::new()
+        };
+
+        let status_bar_style = if has_issues {
+            Style::default().fg(Color::Red).bg(Color::Reset)
+        } else {
+            Style::default().fg(Color::Green).bg(Color::Reset)
+        };
+
+        let status_bar = Paragraph::new(status_text)
+            .style(status_bar_style)
+            .alignment(Alignment::Right);
+
+        f.render_widget(status_bar, status_bar_area);
 
         let header_style = Style::default()
             .fg(Color::Reset)
@@ -203,10 +241,45 @@ pub fn draw_status(
 pub fn draw(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     panel: &Panel,
+    status_panel: &StatusPanel,
 ) -> io::Result<()> {
     terminal.draw(|f| {
         let area = f.size();
-        let height = area.height.saturating_sub(2) as usize;
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(0)
+            .constraints([Constraint::Min(0), Constraint::Length(1)].as_ref())
+            .split(area);
+
+        let content_area = chunks[0];
+        let status_bar_area = chunks[1];
+
+        let (healthy, total, has_issues) = status_panel.get_health_status();
+        let status_text = if total > 0 {
+            format!(
+                " {} {}/{}",
+                if has_issues { "⚠" } else { "✓" },
+                healthy,
+                total
+            )
+        } else {
+            String::new()
+        };
+
+        let status_bar_style = if has_issues {
+            Style::default().fg(Color::Red).bg(Color::Reset)
+        } else {
+            Style::default().fg(Color::Green).bg(Color::Reset)
+        };
+
+        let status_bar = Paragraph::new(status_text)
+            .style(status_bar_style)
+            .alignment(Alignment::Right);
+
+        f.render_widget(status_bar, status_bar_area);
+
+        let height = content_area.height.saturating_sub(2) as usize;
 
         let filtered_lines =
             panel
@@ -234,7 +307,7 @@ pub fn draw(
         let widget =
             Paragraph::new(text).block(Block::default().title(title).borders(Borders::ALL));
 
-        f.render_widget(widget, area);
+        f.render_widget(widget, content_area);
     })?;
     Ok(())
 }

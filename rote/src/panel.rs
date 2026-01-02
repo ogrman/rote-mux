@@ -219,6 +219,36 @@ impl StatusPanel {
             entry.dependencies = dependencies;
         }
     }
+
+    pub fn get_health_status(&self) -> (usize, usize, bool) {
+        let mut total = 0;
+        let mut healthy = 0;
+
+        for entry in &self.entries {
+            if entry.action_type.is_some() {
+                total += 1;
+
+                let is_healthy = match (&entry.action_type, entry.status) {
+                    (
+                        Some(crate::config::ServiceAction::Run { .. }),
+                        crate::ui::ProcessStatus::Exited,
+                    ) => entry.exit_code.map_or(false, |c| c == 0),
+                    (
+                        Some(crate::config::ServiceAction::Start { .. }),
+                        crate::ui::ProcessStatus::Running,
+                    ) => true,
+                    _ => false,
+                };
+
+                if is_healthy {
+                    healthy += 1;
+                }
+            }
+        }
+
+        let has_issues = total > 0 && healthy < total;
+        (healthy, total, has_issues)
+    }
 }
 
 #[cfg(test)]
@@ -573,5 +603,196 @@ mod tests {
             .find(|e| e.service_name == "service1")
             .unwrap();
         assert!(entry.dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_get_health_status_empty() {
+        let panel = StatusPanel::new();
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 0);
+        assert_eq!(total, 0);
+        assert!(!has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_all_healthy_run() {
+        let mut panel = StatusPanel::new();
+        panel.update_entry_with_action(
+            "service1".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Run {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo test",
+                )),
+            },
+        );
+        panel.update_exit_code("service1".to_string(), Some(0));
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 1);
+        assert_eq!(total, 1);
+        assert!(!has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_unhealthy_run_nonzero_exit() {
+        let mut panel = StatusPanel::new();
+        panel.update_entry_with_action(
+            "service1".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Run {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo test",
+                )),
+            },
+        );
+        panel.update_exit_code("service1".to_string(), Some(1));
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 0);
+        assert_eq!(total, 1);
+        assert!(has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_healthy_start_running() {
+        let mut panel = StatusPanel::new();
+        panel.update_entry_with_action(
+            "service1".to_string(),
+            crate::ui::ProcessStatus::Running,
+            ServiceAction::Start {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo test",
+                )),
+            },
+        );
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 1);
+        assert_eq!(total, 1);
+        assert!(!has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_unhealthy_start_exited() {
+        let mut panel = StatusPanel::new();
+        panel.update_entry_with_action(
+            "service1".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Start {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo test",
+                )),
+            },
+        );
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 0);
+        assert_eq!(total, 1);
+        assert!(has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_mixed() {
+        let mut panel = StatusPanel::new();
+
+        panel.update_entry_with_action(
+            "run_success".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Run {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo success",
+                )),
+            },
+        );
+        panel.update_exit_code("run_success".to_string(), Some(0));
+
+        panel.update_entry_with_action(
+            "run_failure".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Run {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo failure",
+                )),
+            },
+        );
+        panel.update_exit_code("run_failure".to_string(), Some(1));
+
+        panel.update_entry_with_action(
+            "start_running".to_string(),
+            crate::ui::ProcessStatus::Running,
+            ServiceAction::Start {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo start",
+                )),
+            },
+        );
+
+        panel.update_entry_with_action(
+            "start_exited".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Start {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo start",
+                )),
+            },
+        );
+
+        panel.update_entry("no_action".to_string(), crate::ui::ProcessStatus::Running);
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 2);
+        assert_eq!(total, 4);
+        assert!(has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_ignores_no_action() {
+        let mut panel = StatusPanel::new();
+        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_entry("service2".to_string(), crate::ui::ProcessStatus::Exited);
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 0);
+        assert_eq!(total, 0);
+        assert!(!has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_multiple_healthy() {
+        let mut panel = StatusPanel::new();
+
+        panel.update_entry_with_action(
+            "run1".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Run {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed("echo 1")),
+            },
+        );
+        panel.update_exit_code("run1".to_string(), Some(0));
+
+        panel.update_entry_with_action(
+            "run2".to_string(),
+            crate::ui::ProcessStatus::Exited,
+            ServiceAction::Run {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed("echo 2")),
+            },
+        );
+        panel.update_exit_code("run2".to_string(), Some(0));
+
+        panel.update_entry_with_action(
+            "start1".to_string(),
+            crate::ui::ProcessStatus::Running,
+            ServiceAction::Start {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo start",
+                )),
+            },
+        );
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 3);
+        assert_eq!(total, 3);
+        assert!(!has_issues);
     }
 }
