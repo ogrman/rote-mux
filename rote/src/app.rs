@@ -134,7 +134,7 @@ pub async fn run_with_input(
     // Resolve all dependencies to get the full list of services to start
     let services_list = resolve_dependencies(&config, &target_services)?;
 
-    // Create panels only for services with a "start" action
+    // Create panels for services with "start" or "run" actions
     let mut panels = Vec::new();
     let mut service_to_panel: HashMap<String, usize> = HashMap::new();
 
@@ -146,8 +146,10 @@ pub async fn run_with_input(
             )
         })?;
 
-        // Only create panels for services with a "start" action
-        if let Some(ServiceAction::Start { command }) = &service_config.action {
+        // Create panels for services with "start" or "run" actions
+        if let Some(ServiceAction::Start { command }) | Some(ServiceAction::Run { command }) =
+            &service_config.action
+        {
             let cmd = shell_words::split(&command.as_command()).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -1007,36 +1009,39 @@ async fn start_services(
         let service_config = config.services.get(service_name).unwrap();
 
         match &service_config.action {
-            Some(ServiceAction::Run { command }) => {
-                // Run to completion
-                let cmd = shell_words::split(&command.as_command()).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("Failed to parse command: {}", e),
-                    )
-                })?;
+            Some(ServiceAction::Run { .. }) => {
+                // Run to completion - spawn and wait like start, but track as run task
+                if let Some(&panel_idx) = service_to_panel.get(service_name) {
+                    let panel = &panels[panel_idx];
+                    let cwd = panel.cwd.as_deref();
+                    let panel_name = panel.service_name.clone();
 
-                let mut command = tokio::process::Command::new(&cmd[0]);
-                command.args(&cmd[1..]);
-
-                if let Some(cwd) = &service_config.cwd {
-                    command.current_dir(cwd);
-                }
-
-                let status = command.status().await?;
-
-                let exit_code = status.code();
-                status_panel.update_entry(service_name.clone(), ProcessStatus::Exited);
-                status_panel.update_exit_code(service_name.clone(), exit_code);
-
-                if !status.success() {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        format!(
-                            "Service '{}' failed with exit code: {:?}",
-                            service_name, exit_code
-                        ),
+                    // Spawn the process
+                    procs[panel_idx] = Some(spawn_process(
+                        panel_idx,
+                        &panel.cmd,
+                        cwd,
+                        tx.clone(),
+                        shutdown_tx.subscribe(),
                     ));
+
+                    // Wait for it to complete
+                    if let Some(proc) = &mut procs[panel_idx] {
+                        let exit_status = proc.wait().await?;
+                        let exit_code = exit_status.code();
+                        status_panel.update_entry(panel_name.clone(), ProcessStatus::Exited);
+                        status_panel.update_exit_code(panel_name, exit_code);
+
+                        if !exit_status.success() {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                format!(
+                                    "Service '{}' failed with exit code: {:?}",
+                                    service_name, exit_code
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
             Some(ServiceAction::Start { .. }) => {
