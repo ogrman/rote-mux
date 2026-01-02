@@ -7,6 +7,9 @@ pub struct Config {
     pub default: Option<String>,
     /// A mapping of service names to their configurations.
     pub services: HashMap<String, ServiceConfiguration>,
+    /// Whether to show timestamps for log messages.
+    #[serde(default)]
+    pub timestamps: bool,
 }
 
 #[derive(Debug, Deserialize)]

@@ -25,13 +25,17 @@ impl MessageBuf {
         Self { rope: Rope::new() }
     }
 
-    pub fn push(&mut self, kind: MessageKind, line: &str) {
+    pub fn push(&mut self, kind: MessageKind, line: &str, timestamp: Option<&str>) {
         let kind_byte = match kind {
             MessageKind::Stdout => b'o',
             MessageKind::Stderr => b'e',
             MessageKind::Status => b's',
         };
-        let encoded = format!("\x1E{}\x1F{}", kind_byte as char, line);
+        let content = match timestamp {
+            Some(ts) => format!("{} {}", ts, line),
+            None => line.to_string(),
+        };
+        let encoded = format!("\x1E{}\x1F{}", kind_byte as char, content);
         self.rope.insert(self.rope.len_chars(), &encoded);
         self.rope.insert(self.rope.len_chars(), "\n");
 
@@ -92,6 +96,7 @@ pub struct Panel {
     pub show_stdout: bool,
     pub show_stderr: bool,
     pub show_status: bool,
+    pub timestamps: bool,
     pub process_status: Option<crate::ui::ProcessStatus>,
 }
 
@@ -102,6 +107,7 @@ impl Panel {
         cwd: Option<String>,
         show_stdout: bool,
         show_stderr: bool,
+        timestamps: bool,
     ) -> Self {
         Self {
             title: service_name.clone(),
@@ -114,8 +120,14 @@ impl Panel {
             show_stdout,
             show_stderr,
             show_status: true,
+            timestamps,
             process_status: None,
         }
+    }
+
+    pub fn with_timestamps(mut self, timestamps: bool) -> Self {
+        self.timestamps = timestamps;
+        self
     }
 
     pub fn visible_len(&self) -> usize {
@@ -224,7 +236,7 @@ mod tests {
     #[test]
     fn test_message_buf_push_single_line() {
         let mut buf = MessageBuf::new();
-        buf.push(MessageKind::Stdout, "test line");
+        buf.push(MessageKind::Stdout, "test line", None);
         assert_eq!(buf.rope.len_lines(), 2);
         assert!(buf.rope.to_string().contains("test line"));
     }
@@ -232,9 +244,9 @@ mod tests {
     #[test]
     fn test_message_buf_push_multiple_lines() {
         let mut buf = MessageBuf::new();
-        buf.push(MessageKind::Stdout, "line 1");
-        buf.push(MessageKind::Stderr, "line 2");
-        buf.push(MessageKind::Status, "line 3");
+        buf.push(MessageKind::Stdout, "line 1", None);
+        buf.push(MessageKind::Stderr, "line 2", None);
+        buf.push(MessageKind::Status, "line 3", None);
         assert_eq!(buf.rope.len_lines(), 4);
         let text = buf.rope.to_string();
         assert!(text.contains("line 1"));
@@ -246,7 +258,7 @@ mod tests {
     fn test_message_buf_truncation() {
         let mut buf = MessageBuf::new();
         for i in 0..MAX_LINES + 100 {
-            buf.push(MessageKind::Stdout, &format!("line {}", i));
+            buf.push(MessageKind::Stdout, &format!("line {}", i), None);
         }
         assert_eq!(buf.rope.len_lines(), MAX_LINES);
     }
@@ -254,9 +266,9 @@ mod tests {
     #[test]
     fn test_message_buf_lines_filtered() {
         let mut buf = MessageBuf::new();
-        buf.push(MessageKind::Stdout, "stdout line");
-        buf.push(MessageKind::Stderr, "stderr line");
-        buf.push(MessageKind::Status, "status line");
+        buf.push(MessageKind::Stdout, "stdout line", None);
+        buf.push(MessageKind::Stderr, "stderr line", None);
+        buf.push(MessageKind::Status, "status line", None);
 
         let lines = buf.lines_filtered(true, true, true);
         assert_eq!(lines.len(), 3);
@@ -271,9 +283,9 @@ mod tests {
     #[test]
     fn test_message_buf_lines_filtered_stdout_only() {
         let mut buf = MessageBuf::new();
-        buf.push(MessageKind::Stdout, "stdout line");
-        buf.push(MessageKind::Stderr, "stderr line");
-        buf.push(MessageKind::Status, "status line");
+        buf.push(MessageKind::Stdout, "stdout line", None);
+        buf.push(MessageKind::Stderr, "stderr line", None);
+        buf.push(MessageKind::Status, "status line", None);
 
         let lines = buf.lines_filtered(true, false, false);
         assert_eq!(lines.len(), 1);
@@ -284,9 +296,9 @@ mod tests {
     #[test]
     fn test_message_buf_lines_filtered_stderr_only() {
         let mut buf = MessageBuf::new();
-        buf.push(MessageKind::Stdout, "stdout line");
-        buf.push(MessageKind::Stderr, "stderr line");
-        buf.push(MessageKind::Status, "status line");
+        buf.push(MessageKind::Stdout, "stdout line", None);
+        buf.push(MessageKind::Stderr, "stderr line", None);
+        buf.push(MessageKind::Status, "status line", None);
 
         let lines = buf.lines_filtered(false, true, false);
         assert_eq!(lines.len(), 1);
@@ -297,9 +309,9 @@ mod tests {
     #[test]
     fn test_message_buf_lines_filtered_status_only() {
         let mut buf = MessageBuf::new();
-        buf.push(MessageKind::Stdout, "stdout line");
-        buf.push(MessageKind::Stderr, "stderr line");
-        buf.push(MessageKind::Status, "status line");
+        buf.push(MessageKind::Stdout, "stdout line", None);
+        buf.push(MessageKind::Stderr, "stderr line", None);
+        buf.push(MessageKind::Status, "status line", None);
 
         let lines = buf.lines_filtered(false, false, true);
         assert_eq!(lines.len(), 1);
@@ -315,6 +327,7 @@ mod tests {
             Some("/tmp".to_string()),
             true,
             true,
+            false,
         );
 
         assert_eq!(panel.title, "test-service");
@@ -325,7 +338,26 @@ mod tests {
         assert!(panel.follow);
         assert!(panel.show_stdout);
         assert!(panel.show_stderr);
+        assert_eq!(panel.timestamps, false);
         assert_eq!(panel.process_status, None);
+    }
+
+    #[test]
+    fn test_panel_new_with_defaults() {
+        let panel = Panel::new(
+            "service".to_string(),
+            vec!["command".to_string()],
+            None,
+            false,
+            false,
+            false,
+        );
+
+        assert_eq!(panel.title, "service");
+        assert_eq!(panel.cwd, None);
+        assert!(!panel.show_stdout);
+        assert!(!panel.show_stderr);
+        assert!(!panel.timestamps);
     }
 
     #[test]
@@ -336,9 +368,10 @@ mod tests {
             None,
             true,
             false,
+            false,
         );
-        panel.messages.push(MessageKind::Stdout, "line 1");
-        panel.messages.push(MessageKind::Stdout, "line 2");
+        panel.messages.push(MessageKind::Stdout, "line 1", None);
+        panel.messages.push(MessageKind::Stdout, "line 2", None);
         assert_eq!(panel.visible_len(), 2);
     }
 
@@ -350,10 +383,11 @@ mod tests {
             None,
             false,
             true,
+            false,
         );
-        panel.messages.push(MessageKind::Stderr, "error 1");
-        panel.messages.push(MessageKind::Stderr, "error 2");
-        panel.messages.push(MessageKind::Stderr, "error 3");
+        panel.messages.push(MessageKind::Stderr, "error 1", None);
+        panel.messages.push(MessageKind::Stderr, "error 2", None);
+        panel.messages.push(MessageKind::Stderr, "error 3", None);
         assert_eq!(panel.visible_len(), 3);
     }
 
@@ -365,10 +399,11 @@ mod tests {
             None,
             true,
             true,
+            false,
         );
-        panel.messages.push(MessageKind::Stdout, "line 1");
-        panel.messages.push(MessageKind::Stderr, "error 1");
-        panel.messages.push(MessageKind::Stdout, "line 2");
+        panel.messages.push(MessageKind::Stdout, "line 1", None);
+        panel.messages.push(MessageKind::Stderr, "error 1", None);
+        panel.messages.push(MessageKind::Stdout, "line 2", None);
         assert_eq!(panel.visible_len(), 3);
     }
 

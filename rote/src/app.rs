@@ -26,6 +26,22 @@ use crate::{
     signals::terminate_child,
     ui::{ProcessStatus, UiEvent},
 };
+use std::time::{SystemTime, UNIX_EPOCH};
+
+fn format_timestamp(timestamps: bool) -> Option<String> {
+    if timestamps {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let hours = (now % 86400) / 3600;
+        let minutes = (now % 3600) / 60;
+        let seconds = now % 60;
+        Some(format!("{:02}:{:02}:{:02}", hours, minutes, seconds))
+    } else {
+        None
+    }
+}
 
 async fn wait_for_shutdown(
     procs: &mut [Option<RunningProcess>],
@@ -165,6 +181,7 @@ pub async fn run_with_input(
                 cwd,
                 show_stdout,
                 show_stderr,
+                config.timestamps,
             ));
         }
     }
@@ -292,7 +309,8 @@ pub async fn run_with_input(
                     StreamKind::Stdout => MessageKind::Stdout,
                     StreamKind::Stderr => MessageKind::Stderr,
                 };
-                p.messages.push(kind, &text);
+                let timestamp = format_timestamp(p.timestamps);
+                p.messages.push(kind, &text, timestamp.as_deref());
 
                 if at_bottom {
                     p.scroll = p.visible_len().saturating_sub(1);
@@ -312,7 +330,10 @@ pub async fn run_with_input(
                     "[exited: {}]",
                     status.map(|s| s.to_string()).unwrap_or("unknown".into())
                 );
-                panels[panel].messages.push(MessageKind::Status, &msg);
+                let timestamp = format_timestamp(panels[panel].timestamps);
+                panels[panel]
+                    .messages
+                    .push(MessageKind::Status, &msg, timestamp.as_deref());
                 status_panel.update_exit_code(panels[panel].service_name.clone(), exit_code);
                 redraw = panel == active;
             }
@@ -391,6 +412,13 @@ pub async fn run_with_input(
                     if showing_status {
                         redraw = true;
                     } else if any_exited {
+                        // Add message to current panel explaining why we're switching
+                        let timestamp = format_timestamp(panels[active].timestamps);
+                        panels[active].messages.push(
+                            MessageKind::Status,
+                            "[switching to status panel: process exited]",
+                            timestamp.as_deref(),
+                        );
                         showing_status = true;
                         redraw = true;
                     }
@@ -404,9 +432,12 @@ pub async fn run_with_input(
                     terminate_child(proc.pid).await;
                 }
                 let was_following = panels[active].follow;
-                panels[active]
-                    .messages
-                    .push(MessageKind::Status, "[restarting]");
+                let timestamp = format_timestamp(panels[active].timestamps);
+                panels[active].messages.push(
+                    MessageKind::Status,
+                    "[restarting]",
+                    timestamp.as_deref(),
+                );
                 let max_len = panels[active].visible_len();
                 if max_len > 0 && was_following {
                     panels[active].scroll = max_len - 1;
@@ -579,6 +610,7 @@ mod tests {
             None,
             false,
             false,
+            false,
         );
         assert_eq!(panel.visible_len(), 0);
     }
@@ -591,9 +623,10 @@ mod tests {
             None,
             true,
             false,
+            false,
         );
-        panel.messages.push(MessageKind::Stdout, "line 1");
-        panel.messages.push(MessageKind::Stdout, "line 2");
+        panel.messages.push(MessageKind::Stdout, "line 1", None);
+        panel.messages.push(MessageKind::Stdout, "line 2", None);
         assert_eq!(panel.visible_len(), 2);
     }
 
@@ -605,10 +638,11 @@ mod tests {
             None,
             false,
             true,
+            false,
         );
-        panel.messages.push(MessageKind::Stderr, "error 1");
-        panel.messages.push(MessageKind::Stderr, "error 2");
-        panel.messages.push(MessageKind::Stderr, "error 3");
+        panel.messages.push(MessageKind::Stderr, "error 1", None);
+        panel.messages.push(MessageKind::Stderr, "error 2", None);
+        panel.messages.push(MessageKind::Stderr, "error 3", None);
         assert_eq!(panel.visible_len(), 3);
     }
 
@@ -620,10 +654,11 @@ mod tests {
             None,
             true,
             true,
+            false,
         );
-        panel.messages.push(MessageKind::Stdout, "line 1");
-        panel.messages.push(MessageKind::Stderr, "error 1");
-        panel.messages.push(MessageKind::Stdout, "line 2");
+        panel.messages.push(MessageKind::Stdout, "line 1", None);
+        panel.messages.push(MessageKind::Stderr, "error 1", None);
+        panel.messages.push(MessageKind::Stdout, "line 2", None);
         assert_eq!(panel.visible_len(), 3);
     }
 
@@ -632,6 +667,7 @@ mod tests {
         let config = Config {
             default: None,
             services: HashMap::new(),
+            timestamps: false,
         };
         let result = resolve_dependencies(&config, &[]).unwrap();
         assert!(result.is_empty());
@@ -653,6 +689,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
@@ -684,6 +721,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
@@ -724,6 +762,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
@@ -767,6 +806,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
@@ -798,6 +838,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["service1".to_string()]);
@@ -815,6 +856,7 @@ mod tests {
         let config = Config {
             default: None,
             services: HashMap::new(),
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["nonexistent".to_string()]);
@@ -843,6 +885,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["service1".to_string()]);
@@ -883,6 +926,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result =
@@ -937,6 +981,7 @@ mod tests {
         let config = Config {
             default: None,
             services,
+            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();

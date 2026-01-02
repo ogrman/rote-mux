@@ -53,8 +53,9 @@ async fn test_panel_stderr_buffer() {
         "test".to_string(),
         cmd.clone(),
         None,
-        true, // show_stdout
-        true, // show_stderr
+        true,  // show_stdout
+        true,  // show_stderr
+        false, // timestamps
     );
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
@@ -79,7 +80,7 @@ async fn test_panel_stderr_buffer() {
                             StreamKind::Stdout => MessageKind::Stdout,
                             StreamKind::Stderr => MessageKind::Stderr,
                         };
-                        panel.messages.push(kind, &text);
+                        panel.messages.push(kind, &text, None);
                     }
                     _ => {}
                 }
@@ -166,7 +167,8 @@ async fn test_visible_len_calculation() {
         cmd.clone(),
         None,
         true,  // show_stdout
-        false, // show_stderr
+        true,  // show_stderr
+        false, // timestamps
     );
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
@@ -191,7 +193,7 @@ async fn test_visible_len_calculation() {
                             StreamKind::Stdout => MessageKind::Stdout,
                             StreamKind::Stderr => MessageKind::Stderr,
                         };
-                        panel.messages.push(kind, &text);
+                        panel.messages.push(kind, &text, None);
                     }
                     _ => {}
                 }
@@ -234,8 +236,9 @@ async fn test_scroll_with_continuous_output() {
         "test".to_string(),
         cmd.clone(),
         None,
-        true, // show_stdout
-        true, // show_stderr
+        true,  // show_stdout
+        true,  // show_stderr
+        false, // timestamps
     );
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
@@ -258,7 +261,7 @@ async fn test_scroll_with_continuous_output() {
                             StreamKind::Stdout => MessageKind::Stdout,
                             StreamKind::Stderr => MessageKind::Stderr,
                         };
-                        panel.messages.push(kind, &text);
+                        panel.messages.push(kind, &text, None);
 
                         if at_bottom {
                             scroll = panel.visible_len().saturating_sub(1);
@@ -304,7 +307,7 @@ async fn test_draw_logic_with_few_lines() {
         "echo line1; echo line2; echo line3".to_string(),
     ];
 
-    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
@@ -327,13 +330,13 @@ async fn test_draw_logic_with_few_lines() {
             Some(event) = rx.recv() => {
                 if let UiEvent::Line { stream: StreamKind::Stdout, text, .. } = event {
                     let at_bottom = follow;
-                    panel.messages.push(MessageKind::Stdout, &text);
+                    panel.messages.push(MessageKind::Stdout, &text, None);
                     if at_bottom {
                         scroll = panel.visible_len().saturating_sub(1);
                     }
                 }
             }
-            _ = &mut deadline => break,
+            _ = &mut deadline => break
         }
     }
 
@@ -366,17 +369,17 @@ async fn test_draw_logic_with_few_lines() {
 }
 
 #[tokio::test]
-async fn test_draw_logic_with_many_lines() {
+async fn test_draw_logic_with_scrolling() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
     let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
         "-c".to_string(),
-        "for i in {1..10}; do echo \"line $i\"; done".to_string(),
+        "for i in 1 2 3 4 5 6 7 8 9 10; do echo \"line $i\"; done".to_string(),
     ];
 
-    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
@@ -399,7 +402,7 @@ async fn test_draw_logic_with_many_lines() {
             Some(event) = rx.recv() => {
                 if let UiEvent::Line { stream: StreamKind::Stdout, text, .. } = event {
                     let at_bottom = follow;
-                    panel.messages.push(MessageKind::Stdout, &text);
+                    panel.messages.push(MessageKind::Stdout, &text, None);
                     if at_bottom {
                         scroll = panel.visible_len().saturating_sub(1);
                     }
@@ -449,7 +452,7 @@ async fn test_mixed_output_order_preservation() {
         "echo 'stdout1'; echo 'stderr1' >&2; echo 'stdout2'; echo 'stderr2' >&2; echo 'stdout3'; echo 'stderr3' >&2".to_string(),
     ];
 
-    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, true);
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, true, false);
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
@@ -474,7 +477,7 @@ async fn test_mixed_output_order_preservation() {
                         StreamKind::Stdout => MessageKind::Stdout,
                         StreamKind::Stderr => MessageKind::Stderr,
                     };
-                    panel.messages.push(kind, &text);
+                    panel.messages.push(kind, &text, None);
                 }
             }
             _ = &mut deadline => break,
@@ -574,7 +577,7 @@ async fn test_colored_output() {
         "echo -e '\\033[31mRed text\\033[0m'; echo -e '\\033[32mGreen text\\033[0m'; echo -e '\\033[34mBlue text\\033[0m'".to_string(),
     ];
 
-    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
@@ -596,7 +599,7 @@ async fn test_colored_output() {
                         StreamKind::Stdout => MessageKind::Stdout,
                         StreamKind::Stderr => MessageKind::Stderr,
                     };
-                    panel.messages.push(kind, &text);
+                    panel.messages.push(kind, &text, None);
                 }
             }
             _ = &mut deadline => break,
@@ -641,17 +644,17 @@ async fn test_colored_output() {
 }
 
 #[tokio::test]
-async fn test_toggle_stream_visibility() {
+async fn test_visible_len_with_stream_toggles() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
     let (shutdown_tx, _) = broadcast::channel::<()>(16);
 
     let cmd = vec![
         "bash".to_string(),
         "-c".to_string(),
-        "echo stdout1; echo stderr1 >&2; echo stdout2; echo stderr2 >&2".to_string(),
+        "echo stdout1; echo stdout2; echo stderr1 >&2; echo stderr2 >&2".to_string(),
     ];
 
-    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false);
+    let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
     let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
 
@@ -674,7 +677,7 @@ async fn test_toggle_stream_visibility() {
                         StreamKind::Stdout => MessageKind::Stdout,
                         StreamKind::Stderr => MessageKind::Stderr,
                     };
-                    panel.messages.push(kind, &text);
+                    panel.messages.push(kind, &text, None);
                 }
             }
             _ = &mut deadline => break,
@@ -701,7 +704,7 @@ async fn test_toggle_stream_visibility() {
     panel.scroll = panel.scroll.min(max);
     panel.follow = panel.scroll == max;
 
-    // Back to 2 lines
+    // Back to 2 stdout lines
     assert_eq!(panel.visible_len(), 2);
     assert_eq!(panel.scroll, 1, "Scroll should be clamped to bottom");
     assert_eq!(panel.follow, true, "Should still be following");
