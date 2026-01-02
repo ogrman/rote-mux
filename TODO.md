@@ -60,6 +60,12 @@ TODO Format:
 [ X ] The last exit code should be shown on the status page for both "run" and
       "start" type commands
 
-[ X ] "run" type tasks should show "Completed" or "Failed" in the status page
-      depending on exit code. "start" type tasks should show "Running" or
-      "Exited"
+ [ X ] "run" type tasks should show "Completed" or "Failed" in the status page
+       depending on exit code. "start" type tasks should show "Running" or
+       "Exited"
+
+ [ ] Add message showing why we switch to status panel when it automatically
+      switches (e.g., when a process exits)
+
+ [ ] Keep panels for exited "run" type tasks around so their output can be
+      viewed

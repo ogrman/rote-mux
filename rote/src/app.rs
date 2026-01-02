@@ -403,8 +403,14 @@ pub async fn run_with_input(
                 if let Some(proc) = procs[active].take() {
                     terminate_child(proc.pid).await;
                 }
+                let was_following = panels[active].follow;
                 panels[active].stdout.push("[restarting]");
                 panels[active].stderr.push("[restarting]");
+                let max_len = panels[active].visible_len();
+                if max_len > 0 && was_following {
+                    panels[active].scroll = max_len - 1;
+                }
+                panels[active].follow = was_following;
                 let cwd = panels[active].cwd.as_deref();
                 procs[active] = Some(spawn_process(
                     active,
