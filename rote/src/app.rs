@@ -433,6 +433,7 @@ pub async fn run_with_input(
                 if let Some(proc) = procs[active].take() {
                     terminate_child(proc.pid).await;
                 }
+                status_panel.update_exit_code(panels[active].service_name.clone(), None);
                 let was_following = panels[active].follow;
                 let timestamp = format_timestamp(panels[active].timestamps);
                 panels[active].messages.push(
