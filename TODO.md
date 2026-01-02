@@ -3,48 +3,48 @@ TODO Format:
 - Unsolved items should be at the top of the file
 - Additional explanation can be added on subsequent lines with 6-space indentation
 
- [ X ] Replace all python code with bash scripts if they are still needed. If
-      they are not needed, remove them. If the test_* scripts are still needed
+[ X ] Replace all python code with bash scripts if they are still needed. If
+      they are not needed, remove them. If test_* scripts are still needed
       they should reside in "tests/". Make sure all script names match the test
       that they are used in. Removed test_exit.py, test_exit2.py, test_exit3.py,
       test_exit.sh, and test_yaml_parse.rs as they were not used in automated
       tests.
 
- [ X ] 2 process tests are failing (test_continuous_output,
-       test_scroll_with_continuous_output) due to architectural changes in
-       process handling. Fixed by replacing oneshot channel with Arc<Mutex<Option>>>
-       to handle futures being dropped in tokio::select! loops.
+[ X ] 2 process tests are failing (test_continuous_output,
+      test_scroll_with_continuous_output) due to architectural changes in
+      process handling. Fixed by replacing oneshot channel with Arc<Mutex<Option>>>
+      to handle futures being dropped in tokio::select! loops.
 
- [ X ] Write tests for mixed stdout/stderr output, including testing that
-       message order is preserved when stdout/stderr is toggled
+[ X ] Write tests for mixed stdout/stderr output, including testing that
+      message order is preserved when stdout/stderr is toggled
 
- [ X ] Analyze test coverage for the entire app and add TODOs for places where
-       tests are missing.
+[ X ] Analyze test coverage for the entire app and add TODOs for places where
+      tests are missing.
 
-  [ X ] Test colored output from the child processes
+[ X ] Test colored output from the child processes
 
-  [ X ] Add unit tests for ui.rs:
-        - ProcessStatus enum variants and behavior
-        - UiEvent enum variants
+[ X ] Add unit tests for ui.rs:
+      - ProcessStatus enum variants and behavior
+      - UiEvent enum variants
 
-  [ X ] Add unit tests for panel.rs:
-        - StreamBuf::push method and line truncation at MAX_LINES
-        - Panel::new constructor
-        - StatusPanel::new constructor
-        - StatusPanel::update_entry method
-        - StatusPanel::update_exit_code method
-        - StatusPanel::update_entry_with_action method
+[ X ] Add unit tests for panel.rs:
+      - StreamBuf::push method and line truncation at MAX_LINES
+      - Panel::new constructor
+      - StatusPanel::new constructor
+      - StatusPanel::update_entry method
+      - StatusPanel::update_exit_code method
+      - StatusPanel::update_entry_with_action method
 
-  [ X ] Add unit tests for signals.rs:
-        - terminate_child function with various signal scenarios
-        - wait_for_child_exit function
+[ X ] Add unit tests for signals.rs:
+      - terminate_child function with various signal scenarios
+      - wait_for_child_exit function
 
-  [ X ] Add unit tests for app.rs:
-        - visible_len function for panel display calculation
-        - resolve_dependencies function for dependency resolution
+[ X ] Add unit tests for app.rs:
+      - visible_len function for panel display calculation
+      - resolve_dependencies function for dependency resolution
 
- [ X ] 'run' type services now appear in the status panel and are tracked
-       correctly
+[ X ] 'run' type services now appear in the status panel and are tracked
+      correctly
 
 [ X ] Exit codes are now displayed in the status page for both 'run' and
       'start' type services
@@ -60,23 +60,23 @@ TODO Format:
 [ X ] The last exit code should be shown on the status page for both "run" and
       "start" type commands
 
- [ X ] "run" type tasks should show "Completed" or "Failed" in the status page
-       depending on exit code. "start" type tasks should show "Running" or
-       "Exited"
+[ X ] "run" type tasks should show "Completed" or "Failed" in the status page
+      depending on exit code. "start" type tasks should show "Running" or
+      "Exited"
 
- [ X ] Add message showing why we switch to status panel when it automatically
-       switches (e.g., when a process exits)
+[ X ] Add message showing why we switch to status panel when it automatically
+      switches (e.g., when a process exits)
 
- [ ] Keep panels for exited "run" type tasks around so their output can be
-       viewed
+[ X ] Keep panels for exited "run" type tasks around so their output can be
+      viewed
 
-       This requires significant architectural change: create panels for Run type
-       services and capture their output like Start type services. Currently
-       Run type services are executed synchronously without panels.
+      Panels are now created for both 'start' and 'run' type services. Run type
+      services spawn processes and wait for completion, capturing output to the
+      panel. The output remains viewable even after the task completes.
 
- [ ] Add option to show timestamps for messages in config format. When it
-     is enabled all logs should have the current time prepended to the line.
+[   ] Add option to show timestamps for messages in config format. When it
+       is enabled all logs should have the current time prepended to the line.
 
-       Config option added and MessageBuf::push signature updated to accept
-       optional timestamp, but full implementation requires updating all message
-       push callsites throughout codebase.
+      Config option added and MessageBuf::push signature updated to accept
+      optional timestamp, but full implementation requires updating all message
+      push callsites throughout codebase.
