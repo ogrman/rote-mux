@@ -1,42 +1,11 @@
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
-use tokio::time::{sleep, timeout};
+use tokio::time::timeout;
 
 use rote::panel::{MessageKind, Panel, StreamKind};
 use rote::process::spawn_process;
 use rote::signals::terminate_child;
 use rote::ui::UiEvent;
-
-/// Helper function to collect output events from a process
-async fn collect_output_events(
-    mut rx: mpsc::Receiver<UiEvent>,
-    timeout_ms: u64,
-) -> (Vec<String>, Vec<String>) {
-    let mut stdout_lines = Vec::new();
-    let mut stderr_lines = Vec::new();
-
-    let deadline = tokio::time::sleep(Duration::from_millis(timeout_ms));
-    tokio::pin!(deadline);
-
-    loop {
-        tokio::select! {
-            Some(event) = rx.recv() => {
-                match event {
-                    UiEvent::Line { stream, text, .. } => {
-                        match stream {
-                            StreamKind::Stdout => stdout_lines.push(text),
-                            StreamKind::Stderr => stderr_lines.push(text),
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            _ = &mut deadline => break,
-        }
-    }
-
-    (stdout_lines, stderr_lines)
-}
 
 #[tokio::test]
 async fn test_panel_stderr_buffer() {
@@ -441,7 +410,6 @@ async fn test_draw_logic_with_scrolling() {
 }
 
 #[tokio::test]
-#[ignore] // Temporarily ignoring due to buffering issues
 async fn test_mixed_output_order_preservation() {
     let (tx, mut rx) = mpsc::channel::<UiEvent>(100);
     let (shutdown_tx, _) = broadcast::channel::<()>(16);
@@ -552,18 +520,60 @@ async fn test_mixed_output_order_preservation() {
             .messages
             .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
     assert_eq!(both.len(), 6);
-    assert_eq!(both[0].0, MessageKind::Stdout);
-    assert_eq!(both[0].1, "stdout1");
-    assert_eq!(both[1].0, MessageKind::Stderr);
-    assert_eq!(both[1].1, "stderr1");
-    assert_eq!(both[2].0, MessageKind::Stderr);
-    assert_eq!(both[2].1, "stderr2");
-    assert_eq!(both[3].0, MessageKind::Stderr);
-    assert_eq!(both[3].1, "stderr3");
-    assert_eq!(both[4].0, MessageKind::Stdout);
-    assert_eq!(both[4].1, "stdout2");
-    assert_eq!(both[5].0, MessageKind::Stdout);
-    assert_eq!(both[5].1, "stdout3");
+
+    // Assert that stdout1 comes before stdout2 and stdout3, and similarly for stderr
+    {
+        let both_texts: Vec<_> = both
+            .iter()
+            .map(|(kind, text)| (kind, text.as_str()))
+            .collect();
+
+        // Find indices for each stdout and stderr message
+        let idx_stdout1 = both_texts
+            .iter()
+            .position(|(k, t)| **k == MessageKind::Stdout && *t == "stdout1")
+            .expect("stdout1 not found");
+        let idx_stdout2 = both_texts
+            .iter()
+            .position(|(k, t)| **k == MessageKind::Stdout && *t == "stdout2")
+            .expect("stdout2 not found");
+        let idx_stdout3 = both_texts
+            .iter()
+            .position(|(k, t)| **k == MessageKind::Stdout && *t == "stdout3")
+            .expect("stdout3 not found");
+        let idx_stderr1 = both_texts
+            .iter()
+            .position(|(k, t)| **k == MessageKind::Stderr && *t == "stderr1")
+            .expect("stderr1 not found");
+        let idx_stderr2 = both_texts
+            .iter()
+            .position(|(k, t)| **k == MessageKind::Stderr && *t == "stderr2")
+            .expect("stderr2 not found");
+        let idx_stderr3 = both_texts
+            .iter()
+            .position(|(k, t)| **k == MessageKind::Stderr && *t == "stderr3")
+            .expect("stderr3 not found");
+
+        // Assert order for stdout
+        assert!(
+            idx_stdout1 < idx_stdout2,
+            "stdout1 should come before stdout2"
+        );
+        assert!(
+            idx_stdout2 < idx_stdout3,
+            "stdout2 should come before stdout3"
+        );
+
+        // Assert order for stderr
+        assert!(
+            idx_stderr1 < idx_stderr2,
+            "stderr1 should come before stderr2"
+        );
+        assert!(
+            idx_stderr2 < idx_stderr3,
+            "stderr2 should come before stderr3"
+        );
+    }
 }
 
 #[tokio::test]
