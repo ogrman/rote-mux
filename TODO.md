@@ -75,11 +75,21 @@ TODO Format:
       panel. The output remains viewable even after the task completes.
 
 [   ] Add option to show timestamps for messages in config format. When it
-       is enabled all logs should have the current time prepended to the line.
+      is enabled all logs should have the current time prepended to the line.
 
       Config option added and MessageBuf::push signature updated to accept
       optional timestamp, but full implementation requires updating all message
       push callsites throughout codebase.
 
-[   ] ServiceInstance should not know it's panel location. Refactor that away,
-      and do the mapping in a better way.
+[   ] ServiceInstance should not know its panel location. Refactor that away,
+      and do the mapping in a better way if possible. Skip doing this work and
+      update this TODO entry if this would lead to things being a lot worse.
+
+[   ] Even services that have not been started should have a panel. Change the
+      semantics of the restart command so that it can be used to start a
+      service that was never started. There should be a 1:1 mapping for service
+      to panel.
+
+[   ] Services should be started asynchronously -- calculate which ones should
+      be started automatically when the application starts and then go straight
+      to the status screen.
