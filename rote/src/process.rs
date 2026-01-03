@@ -14,25 +14,34 @@ use crate::ui::UiEvent;
 
 pub struct RunningProcess {
     pub pid: Option<u32>,
-    pub _stdout_task: JoinHandle<()>,
-    pub _stderr_task: JoinHandle<()>,
-    pub _wait_task: JoinHandle<()>,
-    pub _exit_notify: Arc<Notify>,
-    _exit_status: Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>>,
-    _exit_done: Arc<Notify>,
+    pub stdout_task: JoinHandle<()>,
+    pub stderr_task: JoinHandle<()>,
+    pub wait_task: JoinHandle<()>,
+    exit_status: Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>>,
+    exit_done: Arc<tokio::sync::Notify>,
 }
 
 impl RunningProcess {
+    pub fn spawn(
+        panel: usize,
+        cmd: &[String],
+        cwd: Option<&str>,
+        tx: mpsc::Sender<UiEvent>,
+        shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+    ) -> Self {
+        spawn_process(panel, cmd, cwd, tx, shutdown_rx)
+    }
+
     pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-        self._exit_done.notified().await;
-        let result = self._exit_status.lock().unwrap().take().ok_or_else(|| {
+        self.exit_done.notified().await;
+        let result = self.exit_status.lock().unwrap().take().ok_or_else(|| {
             std::io::Error::new(std::io::ErrorKind::Other, "Exit status not set")
         })??;
         Ok(result)
     }
 
     pub fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
-        let status = self._exit_status.lock().unwrap();
+        let status = self.exit_status.lock().unwrap();
         match status.as_ref() {
             None => Ok(None),
             Some(Ok(s)) => Ok(Some(*s)),
@@ -74,7 +83,7 @@ impl RunningProcess {
     }
 }
 
-pub fn spawn_process(
+fn spawn_process(
     panel: usize,
     cmd: &[String],
     cwd: Option<&str>,
@@ -159,14 +168,12 @@ pub fn spawn_process(
 
     let pid = child.id();
 
-    let exit_notify = Arc::new(Notify::new());
     let exit_status: Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>> =
         Arc::new(Mutex::new(None));
     let exit_done = Arc::new(Notify::new());
 
     let exit_tx_ui = tx.clone();
     let panel_idx = panel;
-    let exit_notify_clone = exit_notify.clone();
     let exit_status_clone = exit_status.clone();
     let exit_done_clone = exit_done.clone();
     let wait_task = tokio::spawn({
@@ -185,7 +192,6 @@ pub fn spawn_process(
             let exit_code = result.as_ref().ok().and_then(|s| s.code());
             let is_ok = result.is_ok();
             let status = result.as_ref().ok().copied();
-            exit_notify_clone.notify_one();
 
             *exit_status_clone.lock().unwrap() = Some(result);
             exit_done_clone.notify_one();
@@ -214,11 +220,10 @@ pub fn spawn_process(
 
     RunningProcess {
         pid,
-        _stdout_task: stdout_task,
-        _stderr_task: stderr_task,
-        _wait_task: wait_task,
-        _exit_notify: exit_notify,
-        _exit_status: exit_status,
-        _exit_done: exit_done,
+        stdout_task,
+        stderr_task,
+        wait_task,
+        exit_status,
+        exit_done,
     }
 }

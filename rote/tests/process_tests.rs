@@ -3,7 +3,7 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
 
 use rote::panel::{MessageKind, Panel, StreamKind};
-use rote::process::spawn_process;
+use rote::process::RunningProcess;
 use rote::ui::UiEvent;
 
 #[tokio::test]
@@ -26,7 +26,7 @@ async fn test_panel_stderr_buffer() {
         false, // timestamps
     );
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -83,7 +83,7 @@ async fn test_continuous_output() {
         "for i in 1 2 3 4 5; do echo \"output $i\"; sleep 0.05; done".to_string(),
     ];
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Don't wait for process to complete, but collect output as it comes
     let mut stdout_lines = Vec::new();
@@ -139,7 +139,7 @@ async fn test_visible_len_calculation() {
         false, // timestamps
     );
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -209,7 +209,7 @@ async fn test_scroll_with_continuous_output() {
         false, // timestamps
     );
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     // Simulate the scroll update logic from app.rs
     let mut scroll = 0;
@@ -277,7 +277,7 @@ async fn test_draw_logic_with_few_lines() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -349,7 +349,7 @@ async fn test_draw_logic_with_scrolling() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -421,7 +421,7 @@ async fn test_mixed_output_order_preservation() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, true, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -588,7 +588,7 @@ async fn test_colored_output() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -665,7 +665,7 @@ async fn test_visible_len_with_stream_toggles() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = spawn_process(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc = RunningProcess::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -750,15 +750,15 @@ async fn test_terminate_multiple_processes() {
     let cmd2 = vec!["sleep".to_string(), "0.1".to_string()];
     let cmd3 = vec!["sleep".to_string(), "0.1".to_string()];
 
-    let mut proc1 = spawn_process(0, &cmd1, None, tx.clone(), shutdown_tx.subscribe());
-    let mut proc2 = spawn_process(
+    let mut proc1 = RunningProcess::spawn(0, &cmd1, None, tx.clone(), shutdown_tx.subscribe());
+    let mut proc2 = RunningProcess::spawn(
         1,
         &cmd2,
         None,
         tx.clone(),
         shutdown_tx.subscribe().resubscribe(),
     );
-    let mut proc3 = spawn_process(
+    let mut proc3 = RunningProcess::spawn(
         2,
         &cmd3,
         None,

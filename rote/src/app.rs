@@ -21,7 +21,7 @@ const SHUTDOWN_CHECK_INTERVAL_MS: u64 = 100;
 use crate::{
     config::{Config, ServiceAction},
     panel::{MessageKind, Panel, StatusPanel, StreamKind},
-    process::{RunningProcess, spawn_process},
+    process::RunningProcess,
     render,
     ui::{ProcessStatus, UiEvent},
 };
@@ -414,7 +414,7 @@ pub async fn run_with_input(
             UiEvent::Restart => {
                 if let Some(proc) = procs[active].take() {
                     proc.terminate().await;
-                    let _ = proc._wait_task.await;
+                    let _ = proc.wait_task.await;
                 }
 
                 status_panel.update_exit_code(panels[active].service_name.clone(), None);
@@ -432,7 +432,7 @@ pub async fn run_with_input(
                 panels[active].follow = was_following;
 
                 let cwd = panels[active].cwd.as_deref();
-                procs[active] = Some(spawn_process(
+                procs[active] = Some(RunningProcess::spawn(
                     active,
                     &panels[active].cmd,
                     cwd,
@@ -501,9 +501,9 @@ pub async fn run_with_input(
 
     for p in procs.iter() {
         if let Some(proc) = p {
-            proc._stdout_task.abort();
-            proc._stderr_task.abort();
-            proc._wait_task.abort();
+            proc.stdout_task.abort();
+            proc.stderr_task.abort();
+            proc.wait_task.abort();
         }
     }
 
@@ -1003,7 +1003,7 @@ async fn start_services(
                     let panel_name = panel.service_name.clone();
 
                     // Spawn the process
-                    procs[panel_idx] = Some(spawn_process(
+                    procs[panel_idx] = Some(RunningProcess::spawn(
                         panel_idx,
                         &panel.cmd,
                         cwd,
@@ -1035,7 +1035,7 @@ async fn start_services(
                 if let Some(&panel_idx) = service_to_panel.get(service_name) {
                     let panel = &panels[panel_idx];
                     let cwd = panel.cwd.as_deref();
-                    procs[panel_idx] = Some(spawn_process(
+                    procs[panel_idx] = Some(RunningProcess::spawn(
                         panel_idx,
                         &panel.cmd,
                         cwd,
