@@ -1,4 +1,7 @@
+use nix::sys::signal::{Signal, kill};
+use nix::unistd::Pid;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
@@ -37,6 +40,36 @@ impl RunningProcess {
                 std::io::ErrorKind::Other,
                 e.to_string(),
             )),
+        }
+    }
+
+    pub async fn terminate(&self) {
+        let Some(pid) = self.pid else {
+            return;
+        };
+        let pid = Pid::from_raw(pid as i32);
+
+        let _ = kill(pid, Signal::SIGINT);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        if Self::check_process_exited(pid) {
+            return;
+        }
+
+        let _ = kill(pid, Signal::SIGTERM);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        if Self::check_process_exited(pid) {
+            return;
+        }
+
+        let _ = kill(pid, Signal::SIGKILL);
+    }
+
+    fn check_process_exited(pid: Pid) -> bool {
+        use nix::sys::signal::kill;
+        match kill(pid, None) {
+            Err(nix::Error::ESRCH) => true,
+            Ok(_) => false,
+            Err(_) => false,
         }
     }
 }

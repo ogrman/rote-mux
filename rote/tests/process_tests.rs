@@ -4,7 +4,6 @@ use tokio::time::timeout;
 
 use rote::panel::{MessageKind, Panel, StreamKind};
 use rote::process::spawn_process;
-use rote::signals::terminate_child;
 use rote::ui::UiEvent;
 
 #[tokio::test]
@@ -776,9 +775,9 @@ async fn test_terminate_multiple_processes() {
     assert!(proc3.try_wait().unwrap().is_none());
 
     // Terminate all processes (simulating Exit event handler)
-    terminate_child(proc1.pid).await;
-    terminate_child(proc2.pid).await;
-    terminate_child(proc3.pid).await;
+    proc1.terminate().await;
+    proc2.terminate().await;
+    proc3.terminate().await;
 
     // Verify all processes are terminated
     let status1 = proc1.try_wait().unwrap();

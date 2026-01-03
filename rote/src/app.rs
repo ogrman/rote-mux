@@ -23,7 +23,6 @@ use crate::{
     panel::{MessageKind, Panel, StatusPanel, StreamKind},
     process::{RunningProcess, spawn_process},
     render,
-    signals::terminate_child,
     ui::{ProcessStatus, UiEvent},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -414,7 +413,7 @@ pub async fn run_with_input(
 
             UiEvent::Restart => {
                 if let Some(proc) = procs[active].take() {
-                    terminate_child(proc.pid).await;
+                    proc.terminate().await;
                     let _ = proc._wait_task.await;
                 }
 
@@ -458,7 +457,7 @@ pub async fn run_with_input(
                 // Terminate all processes
                 for p in procs.iter_mut() {
                     if let Some(proc) = p {
-                        terminate_child(proc.pid).await;
+                        proc.terminate().await;
                     }
                 }
 
