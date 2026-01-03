@@ -21,7 +21,7 @@ const SHUTDOWN_CHECK_INTERVAL_MS: u64 = 100;
 use crate::{
     config::{Config, ServiceAction},
     panel::{MessageKind, Panel, StatusPanel, StreamKind},
-    process::RunningProcess,
+    process::ServiceInstance,
     render,
     ui::{ProcessStatus, UiEvent},
 };
@@ -43,7 +43,7 @@ fn format_timestamp(timestamps: bool) -> Option<String> {
 }
 
 async fn wait_for_shutdown(
-    procs: &mut [Option<RunningProcess>],
+    procs: &mut [Option<ServiceInstance>],
     panels: &[Panel],
     status_panel: &mut StatusPanel,
     enable_terminal: bool,
@@ -216,7 +216,7 @@ pub async fn run_with_input(
     }
 
     // Start processes according to dependencies
-    let mut procs: Vec<Option<RunningProcess>> = (0..panels.len()).map(|_| None).collect();
+    let mut procs: Vec<Option<ServiceInstance>> = (0..panels.len()).map(|_| None).collect();
     start_services(
         &config,
         &services_list,
@@ -432,7 +432,7 @@ pub async fn run_with_input(
                 panels[active].follow = was_following;
 
                 let cwd = panels[active].cwd.as_deref();
-                procs[active] = Some(RunningProcess::spawn(
+                procs[active] = Some(ServiceInstance::spawn(
                     active,
                     &panels[active].cmd,
                     cwd,
@@ -986,7 +986,7 @@ async fn start_services(
     services_list: &[String],
     service_to_panel: &HashMap<String, usize>,
     panels: &[Panel],
-    procs: &mut Vec<Option<RunningProcess>>,
+    procs: &mut Vec<Option<ServiceInstance>>,
     tx: tokio::sync::mpsc::Sender<UiEvent>,
     shutdown_tx: &tokio::sync::broadcast::Sender<()>,
     status_panel: &mut StatusPanel,
@@ -1003,7 +1003,7 @@ async fn start_services(
                     let panel_name = panel.service_name.clone();
 
                     // Spawn the process
-                    procs[panel_idx] = Some(RunningProcess::spawn(
+                    procs[panel_idx] = Some(ServiceInstance::spawn(
                         panel_idx,
                         &panel.cmd,
                         cwd,
@@ -1035,7 +1035,7 @@ async fn start_services(
                 if let Some(&panel_idx) = service_to_panel.get(service_name) {
                     let panel = &panels[panel_idx];
                     let cwd = panel.cwd.as_deref();
-                    procs[panel_idx] = Some(RunningProcess::spawn(
+                    procs[panel_idx] = Some(ServiceInstance::spawn(
                         panel_idx,
                         &panel.cmd,
                         cwd,

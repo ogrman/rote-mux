@@ -12,7 +12,7 @@ use tokio::{
 use crate::panel::StreamKind;
 use crate::ui::UiEvent;
 
-pub struct RunningProcess {
+pub struct ServiceInstance {
     pub pid: Option<u32>,
     pub stdout_task: JoinHandle<()>,
     pub stderr_task: JoinHandle<()>,
@@ -21,7 +21,7 @@ pub struct RunningProcess {
     exit_done: Arc<tokio::sync::Notify>,
 }
 
-impl RunningProcess {
+impl ServiceInstance {
     pub fn spawn(
         panel: usize,
         cmd: &[String],
@@ -89,7 +89,7 @@ fn spawn_process(
     cwd: Option<&str>,
     tx: mpsc::Sender<UiEvent>,
     shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-) -> RunningProcess {
+) -> ServiceInstance {
     let mut command = Command::new(&cmd[0]);
     command
         .args(&cmd[1..])
@@ -218,7 +218,7 @@ fn spawn_process(
         }
     });
 
-    RunningProcess {
+    ServiceInstance {
         pid,
         stdout_task,
         stderr_task,
