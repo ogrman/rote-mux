@@ -81,6 +81,30 @@ impl ServiceInstance {
             Err(_) => false,
         }
     }
+
+    fn send_exit_event(
+        tx: &mpsc::Sender<UiEvent>,
+        panel: usize,
+        result: &std::io::Result<std::process::ExitStatus>,
+    ) {
+        let exit_code = result.as_ref().ok().and_then(|s| s.code());
+        let is_ok = result.is_ok();
+        let status = result.as_ref().ok().copied();
+
+        if is_ok {
+            let _ = tx.try_send(UiEvent::Exited {
+                panel,
+                status: status.map(|s| s),
+                exit_code,
+            });
+        } else {
+            let _ = tx.try_send(UiEvent::Exited {
+                panel,
+                status: None,
+                exit_code: None,
+            });
+        }
+    }
 }
 
 fn spawn_process(
@@ -172,12 +196,11 @@ fn spawn_process(
         Arc::new(Mutex::new(None));
     let exit_done = Arc::new(Notify::new());
 
-    let exit_tx_ui = tx.clone();
-    let panel_idx = panel;
     let exit_status_clone = exit_status.clone();
     let exit_done_clone = exit_done.clone();
     let wait_task = tokio::spawn({
         let mut rx = shutdown_rx.resubscribe();
+        let tx_clone = tx.clone();
         async move {
             let result = tokio::select! {
                 _ = rx.recv() => {
@@ -189,32 +212,14 @@ fn spawn_process(
                 result = child.wait() => result,
             };
 
-            let exit_code = result.as_ref().ok().and_then(|s| s.code());
-            let is_ok = result.is_ok();
-            let status = result.as_ref().ok().copied();
-
             *exit_status_clone.lock().unwrap() = Some(result);
             exit_done_clone.notify_one();
 
-            if is_ok {
-                // Ignore send errors - if channel is closed, we're shutting down
-                let _ = exit_tx_ui
-                    .send(UiEvent::Exited {
-                        panel: panel_idx,
-                        status: status.map(|s| s),
-                        exit_code,
-                    })
-                    .await;
-            } else {
-                // Ignore send errors - if channel is closed, we're shutting down
-                let _ = exit_tx_ui
-                    .send(UiEvent::Exited {
-                        panel: panel_idx,
-                        status: None,
-                        exit_code: None,
-                    })
-                    .await;
-            }
+            ServiceInstance::send_exit_event(
+                &tx_clone,
+                panel,
+                exit_status_clone.lock().unwrap().as_ref().unwrap(),
+            );
         }
     });
 

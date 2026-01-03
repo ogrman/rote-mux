@@ -80,3 +80,6 @@ TODO Format:
       Config option added and MessageBuf::push signature updated to accept
       optional timestamp, but full implementation requires updating all message
       push callsites throughout codebase.
+
+[   ] ServiceInstance should not know it's panel location. Refactor that away,
+      and do the mapping in a better way.
