@@ -256,6 +256,11 @@ impl StatusPanel {
         let mut healthy = 0;
 
         for entry in &self.entries {
+            // Skip services that haven't started yet
+            if entry.status == crate::ui::ProcessStatus::NotStarted {
+                continue;
+            }
+
             if entry.action_type.is_some() {
                 total += 1;
 
@@ -824,6 +829,38 @@ mod tests {
         let (healthy, total, has_issues) = panel.get_health_status();
         assert_eq!(healthy, 3);
         assert_eq!(total, 3);
+        assert!(!has_issues);
+    }
+
+    #[test]
+    fn test_get_health_status_excludes_not_started() {
+        let mut panel = StatusPanel::new();
+
+        // A service that has started and is running - should be counted
+        panel.update_entry_with_action(
+            "started".to_string(),
+            crate::ui::ProcessStatus::Running,
+            ServiceAction::Start {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo started",
+                )),
+            },
+        );
+
+        // A service that hasn't started yet - should NOT be counted
+        panel.update_entry_with_action(
+            "pending".to_string(),
+            crate::ui::ProcessStatus::NotStarted,
+            ServiceAction::Start {
+                command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
+                    "echo pending",
+                )),
+            },
+        );
+
+        let (healthy, total, has_issues) = panel.get_health_status();
+        assert_eq!(healthy, 1);
+        assert_eq!(total, 1);
         assert!(!has_issues);
     }
 
