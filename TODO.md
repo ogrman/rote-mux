@@ -133,3 +133,12 @@ TODO Format:
       Panels and status panel entries are now sorted alphabetically by service
       name. This ensures consistent ordering regardless of HashMap iteration
       order.
+
+[   ] Fix scrolling. It's now possible to scroll up beyond the start of the
+      output buffer, leaving parts of the screen empty. Limit the amount of
+      scrolling so that we can't scroll beyond the start of the buffer.
+
+[   ] Add scrollbars to the panels. Use line count, ignore lines that are
+      longer than the output buffer for the calculation.
+
+[   ] Add the keybindings for scolling to the key bindings panel.
