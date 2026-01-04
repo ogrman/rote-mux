@@ -65,56 +65,31 @@ pub fn draw_status(
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
-            .constraints(
-                [
-                    Constraint::Min(0),
-                    Constraint::Length(3),
-                    Constraint::Length(6),
-                ]
-                .as_ref(),
-            )
+            .constraints([Constraint::Min(0), Constraint::Length(6)].as_ref())
             .split(area);
 
-        let inner_chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(1)
-            .constraints(
-                [
-                    Constraint::Length(status_panel.entries.len() as u16 + 3),
-                    Constraint::Min(0),
-                ]
-                .as_ref(),
-            )
-            .split(chunks[0]);
-
-        let table_area = inner_chunks[0];
-        let status_bar_area = chunks[1];
-        let help_area = chunks[2];
+        let main_area = chunks[0];
+        let help_area = chunks[1];
 
         let (healthy, total, has_issues) = status_panel.get_health_status();
-        let status_text = if total > 0 {
-            format!(
-                " {} {}/{}",
-                if has_issues { "⚠" } else { "✓" },
-                healthy,
-                total
-            )
+
+        let status_summary = if total > 0 {
+            let status_icon = if has_issues { "⚠" } else { "✓" };
+            let status_style = if has_issues {
+                Style::default().fg(Color::Red)
+            } else {
+                Style::default().fg(Color::Green)
+            };
+            Line::from(vec![
+                Span::styled(
+                    format!(" {} {}/{}", status_icon, healthy, total),
+                    status_style,
+                ),
+                Span::raw(" services healthy"),
+            ])
         } else {
-            String::new()
+            Line::from(" No services")
         };
-
-        let status_bar_style = if has_issues {
-            Style::default().fg(Color::Red).bg(Color::Reset)
-        } else {
-            Style::default().fg(Color::Green).bg(Color::Reset)
-        };
-
-        let status_bar = Paragraph::new(status_text)
-            .style(status_bar_style)
-            .alignment(Alignment::Right)
-            .block(Block::default().title("Status").borders(Borders::ALL));
-
-        f.render_widget(status_bar, status_bar_area);
 
         let header_style = Style::default()
             .fg(Color::Reset)
@@ -146,7 +121,7 @@ pub fn draw_status(
                         ("● Running", Color::Green)
                     }
                     (Some(ServiceAction::Start { .. }), ProcessStatus::Exited) => {
-                        ("✓ Exited", Color::Gray)
+                        ("✗ Exited", Color::Red)
                     }
                     (_, ProcessStatus::Running) => ("● Running", Color::Green),
                     (_, ProcessStatus::Exited) => ("✓ Exited", Color::Gray),
@@ -214,13 +189,9 @@ pub fn draw_status(
             ],
         )
         .header(header)
-        .block(
-            Block::default()
-                .title("Process Status")
-                .borders(Borders::ALL),
-        );
+        .block(Block::default().title(status_summary).borders(Borders::ALL));
 
-        f.render_widget(table, table_area);
+        f.render_widget(table, main_area);
 
         let help_text = [
             String::from("Press a number (1-9) to view a process"),
@@ -242,7 +213,7 @@ pub fn draw_status(
 pub fn draw(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     panel: &Panel,
-    status_panel: &StatusPanel,
+    _status_panel: &StatusPanel,
 ) -> io::Result<()> {
     terminal.draw(|f| {
         let area = f.size();
@@ -250,36 +221,11 @@ pub fn draw(
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
-            .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
+            .constraints([Constraint::Min(0), Constraint::Length(6)].as_ref())
             .split(area);
 
         let content_area = chunks[0];
-        let status_bar_area = chunks[1];
-
-        let (healthy, total, has_issues) = status_panel.get_health_status();
-        let status_text = if total > 0 {
-            format!(
-                " {} {}/{}",
-                if has_issues { "⚠" } else { "✓" },
-                healthy,
-                total
-            )
-        } else {
-            String::new()
-        };
-
-        let status_bar_style = if has_issues {
-            Style::default().fg(Color::Red).bg(Color::Reset)
-        } else {
-            Style::default().fg(Color::Green).bg(Color::Reset)
-        };
-
-        let status_bar = Paragraph::new(status_text)
-            .style(status_bar_style)
-            .alignment(Alignment::Right)
-            .block(Block::default().title("Status").borders(Borders::ALL));
-
-        f.render_widget(status_bar, status_bar_area);
+        let help_area = chunks[1];
 
         let height = content_area.height.saturating_sub(2) as usize;
 
@@ -310,6 +256,20 @@ pub fn draw(
             Paragraph::new(text).block(Block::default().title(title).borders(Borders::ALL));
 
         f.render_widget(widget, content_area);
+
+        let help_text = [
+            String::from("Press a number (1-9) to view a process"),
+            String::from("Press 's' to move to service overview"),
+            String::from("Press 'r' to restart current process"),
+            String::from("Press 'q' to quit"),
+        ]
+        .join("\n");
+
+        let help_widget = Paragraph::new(help_text)
+            .alignment(Alignment::Left)
+            .block(Block::default().title("Key Bindings").borders(Borders::ALL));
+
+        f.render_widget(help_widget, help_area);
     })?;
     Ok(())
 }
