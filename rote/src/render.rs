@@ -295,6 +295,8 @@ pub fn draw(
         let help_text = [
             "1-9  view process",
             "←/→  navigate",
+            "↑/↓  scroll",
+            "PgUp/PgDn scroll fast",
             "s    status",
             "q    quit",
             "r    restart",
