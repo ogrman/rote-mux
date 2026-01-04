@@ -134,11 +134,20 @@ TODO Format:
       name. This ensures consistent ordering regardless of HashMap iteration
       order.
 
-[   ] Fix scrolling. It's now possible to scroll up beyond the start of the
+[ X ] Fix scrolling. It's now possible to scroll up beyond the start of the
       output buffer, leaving parts of the screen empty. Limit the amount of
       scrolling so that we can't scroll beyond the start of the buffer.
 
-[   ] Add scrollbars to the panels. Use line count, ignore lines that are
+      Fixed by clamping scroll position based on viewport height in both the
+      scroll event handler (app.rs) and the render function (render.rs).
+
+[ X ] Add scrollbars to the panels. Use line count, ignore lines that are
       longer than the output buffer for the calculation.
 
-[   ] Add the keybindings for scolling to the key bindings panel.
+      Added vertical scrollbar using ratatui's Scrollbar widget. The scrollbar
+      appears when content exceeds the viewport height and accurately reflects
+      the scroll position.
+
+[ X ] Add the keybindings for scrolling to the key bindings panel.
+
+      Added ↑/↓ (scroll) and PgUp/PgDn (scroll fast) to the help panel.
