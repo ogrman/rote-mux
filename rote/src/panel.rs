@@ -1,7 +1,38 @@
 use ropey::Rope;
 use std::collections::HashMap;
+use std::ops::Deref;
 
 pub const MAX_LINES: usize = 5_000;
+
+/// A strongly-typed panel index to prevent accidentally mixing panel indices with other usize values.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct PanelIndex(pub usize);
+
+impl PanelIndex {
+    pub fn new(index: usize) -> Self {
+        Self(index)
+    }
+}
+
+impl Deref for PanelIndex {
+    type Target = usize;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<usize> for PanelIndex {
+    fn from(index: usize) -> Self {
+        Self(index)
+    }
+}
+
+impl From<PanelIndex> for usize {
+    fn from(index: PanelIndex) -> Self {
+        index.0
+    }
+}
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum StreamKind {
@@ -20,6 +51,12 @@ pub struct MessageBuf {
     pub rope: Rope,
 }
 
+impl Default for MessageBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MessageBuf {
     pub fn new() -> Self {
         Self { rope: Rope::new() }
@@ -32,7 +69,7 @@ impl MessageBuf {
             MessageKind::Status => b's',
         };
         let content = match timestamp {
-            Some(ts) => format!("{} {}", ts, line),
+            Some(ts) => format!("{ts} {line}"),
             None => line.to_string(),
         };
         let encoded = format!("\x1E{}\x1F{}", kind_byte as char, content);
@@ -158,22 +195,29 @@ impl StatusPanel {
         Self::default()
     }
 
-    pub fn update_entry(&mut self, service_name: String, status: crate::ui::ProcessStatus) {
-        if let Some(entry) = self
+    /// Get a mutable reference to an entry, creating it if it doesn't exist.
+    fn get_or_create_entry(&mut self, service_name: &str) -> &mut StatusEntry {
+        let pos = self
             .entries
-            .iter_mut()
-            .find(|e| e.service_name == service_name)
-        {
-            entry.status = status;
-        } else {
-            self.entries.push(StatusEntry {
-                service_name,
-                status,
-                exit_code: None,
-                action_type: None,
-                dependencies: Vec::new(),
-            });
+            .iter()
+            .position(|e| e.service_name == service_name);
+        match pos {
+            Some(idx) => &mut self.entries[idx],
+            None => {
+                self.entries.push(StatusEntry {
+                    service_name: service_name.to_string(),
+                    status: crate::ui::ProcessStatus::Exited,
+                    exit_code: None,
+                    action_type: None,
+                    dependencies: Vec::new(),
+                });
+                self.entries.last_mut().unwrap()
+            }
         }
+    }
+
+    pub fn update_entry(&mut self, service_name: String, status: crate::ui::ProcessStatus) {
+        self.get_or_create_entry(&service_name).status = status;
     }
 
     pub fn update_exit_code(&mut self, service_name: String, exit_code: Option<i32>) {
@@ -192,22 +236,9 @@ impl StatusPanel {
         status: crate::ui::ProcessStatus,
         action_type: crate::config::ServiceAction,
     ) {
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|e| e.service_name == service_name)
-        {
-            entry.status = status;
-            entry.action_type = Some(action_type);
-        } else {
-            self.entries.push(StatusEntry {
-                service_name,
-                status,
-                exit_code: None,
-                action_type: Some(action_type),
-                dependencies: Vec::new(),
-            });
-        }
+        let entry = self.get_or_create_entry(&service_name);
+        entry.status = status;
+        entry.action_type = Some(action_type);
     }
 
     pub fn update_dependencies(&mut self, service_name: String, dependencies: Vec<String>) {
@@ -232,7 +263,7 @@ impl StatusPanel {
                     (
                         Some(crate::config::ServiceAction::Run { .. }),
                         crate::ui::ProcessStatus::Exited,
-                    ) => entry.exit_code.map_or(false, |c| c == 0),
+                    ) => entry.exit_code == Some(0),
                     (
                         Some(crate::config::ServiceAction::Start { .. }),
                         crate::ui::ProcessStatus::Running,
@@ -288,7 +319,7 @@ mod tests {
     fn test_message_buf_truncation() {
         let mut buf = MessageBuf::new();
         for i in 0..MAX_LINES + 100 {
-            buf.push(MessageKind::Stdout, &format!("line {}", i), None);
+            buf.push(MessageKind::Stdout, &format!("line {i}"), None);
         }
         assert_eq!(buf.rope.len_lines(), MAX_LINES);
     }
@@ -368,7 +399,7 @@ mod tests {
         assert!(panel.follow);
         assert!(panel.show_stdout);
         assert!(panel.show_stderr);
-        assert_eq!(panel.timestamps, false);
+        assert!(!panel.timestamps);
         assert_eq!(panel.process_status, None);
     }
 
@@ -794,5 +825,53 @@ mod tests {
         assert_eq!(healthy, 3);
         assert_eq!(total, 3);
         assert!(!has_issues);
+    }
+
+    #[test]
+    fn test_panel_index_new() {
+        let idx = PanelIndex::new(5);
+        assert_eq!(*idx, 5);
+        assert_eq!(idx.0, 5);
+    }
+
+    #[test]
+    fn test_panel_index_deref() {
+        let idx = PanelIndex::new(3);
+        // Deref should give us the inner usize
+        let val: usize = *idx;
+        assert_eq!(val, 3);
+    }
+
+    #[test]
+    fn test_panel_index_from_usize() {
+        let idx: PanelIndex = 7.into();
+        assert_eq!(*idx, 7);
+    }
+
+    #[test]
+    fn test_panel_index_into_usize() {
+        let idx = PanelIndex::new(4);
+        let val: usize = idx.into();
+        assert_eq!(val, 4);
+    }
+
+    #[test]
+    fn test_panel_index_equality() {
+        let a = PanelIndex::new(2);
+        let b = PanelIndex::new(2);
+        let c = PanelIndex::new(3);
+
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_panel_index_copy_clone() {
+        let a = PanelIndex::new(1);
+        let b = a; // Copy
+        let c = a.clone(); // Clone
+
+        assert_eq!(a, b);
+        assert_eq!(a, c);
     }
 }

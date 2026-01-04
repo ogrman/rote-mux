@@ -1,4 +1,4 @@
-use crate::panel::StreamKind;
+use crate::panel::{PanelIndex, StreamKind};
 use std::process::ExitStatus;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -10,20 +10,20 @@ pub enum ProcessStatus {
 #[derive(Clone)]
 pub enum UiEvent {
     Line {
-        panel: usize,
+        panel: PanelIndex,
         stream: StreamKind,
         text: String,
     },
     Exited {
-        panel: usize,
+        panel: PanelIndex,
         status: Option<ExitStatus>,
         exit_code: Option<i32>,
     },
     ProcessStatus {
-        panel: usize,
+        panel: PanelIndex,
         status: ProcessStatus,
     },
-    SwitchPanel(usize),
+    SwitchPanel(PanelIndex),
     SwitchToStatus,
     CheckStatus,
     Scroll(i32),
@@ -31,11 +31,14 @@ pub enum UiEvent {
     ToggleStderr,
     Restart,
     Exit,
+    /// Trigger starting the next pending service
+    StartNextService,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::panel::PanelIndex;
 
     #[test]
     fn test_process_status_variants() {
@@ -50,7 +53,7 @@ mod tests {
     #[test]
     fn test_process_status_clone() {
         let status = ProcessStatus::Running;
-        let cloned = status.clone();
+        let cloned = status;
         assert_eq!(status, cloned);
     }
 
@@ -67,14 +70,14 @@ mod tests {
         let running = ProcessStatus::Running;
         let exited = ProcessStatus::Exited;
 
-        assert_eq!(format!("{:?}", running), "Running");
-        assert_eq!(format!("{:?}", exited), "Exited");
+        assert_eq!(format!("{running:?}"), "Running");
+        assert_eq!(format!("{exited:?}"), "Exited");
     }
 
     #[test]
     fn test_ui_event_line() {
         let event = UiEvent::Line {
-            panel: 1,
+            panel: PanelIndex::new(1),
             stream: StreamKind::Stdout,
             text: String::from("test output"),
         };
@@ -85,7 +88,7 @@ mod tests {
                 stream,
                 text,
             } => {
-                assert_eq!(panel, 1);
+                assert_eq!(*panel, 1);
                 assert_eq!(stream, StreamKind::Stdout);
                 assert_eq!(text, "test output");
             }
@@ -96,7 +99,7 @@ mod tests {
     #[test]
     fn test_ui_event_exited() {
         let event = UiEvent::Exited {
-            panel: 2,
+            panel: PanelIndex::new(2),
             status: None,
             exit_code: Some(0),
         };
@@ -107,7 +110,7 @@ mod tests {
                 status,
                 exit_code,
             } => {
-                assert_eq!(panel, 2);
+                assert_eq!(*panel, 2);
                 assert_eq!(status, None);
                 assert_eq!(exit_code, Some(0));
             }
@@ -118,13 +121,13 @@ mod tests {
     #[test]
     fn test_ui_event_process_status() {
         let event = UiEvent::ProcessStatus {
-            panel: 0,
+            panel: PanelIndex::new(0),
             status: ProcessStatus::Running,
         };
 
         match event {
             UiEvent::ProcessStatus { panel, status } => {
-                assert_eq!(panel, 0);
+                assert_eq!(*panel, 0);
                 assert_eq!(status, ProcessStatus::Running);
             }
             _ => panic!("Expected UiEvent::ProcessStatus"),
@@ -133,7 +136,7 @@ mod tests {
 
     #[test]
     fn test_ui_event_simple_variants() {
-        let switch_panel = UiEvent::SwitchPanel(3);
+        let switch_panel = UiEvent::SwitchPanel(PanelIndex::new(3));
         let switch_to_status = UiEvent::SwitchToStatus;
         let check_status = UiEvent::CheckStatus;
         let scroll = UiEvent::Scroll(-10);
@@ -143,7 +146,7 @@ mod tests {
         let exit = UiEvent::Exit;
 
         match switch_panel {
-            UiEvent::SwitchPanel(panel) => assert_eq!(panel, 3),
+            UiEvent::SwitchPanel(panel) => assert_eq!(*panel, 3),
             _ => panic!("Expected UiEvent::SwitchPanel"),
         }
 
@@ -163,7 +166,7 @@ mod tests {
     #[test]
     fn test_ui_event_clone() {
         let event = UiEvent::Line {
-            panel: 1,
+            panel: PanelIndex::new(1),
             stream: StreamKind::Stderr,
             text: String::from("error message"),
         };

@@ -27,7 +27,7 @@ pub fn draw_shutdown(
         for entry in &status_panel.entries {
             let status_str = match (&entry.action_type, entry.status) {
                 (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
-                    if entry.exit_code.map_or(false, |c| c == 0) {
+                    if entry.exit_code == Some(0) {
                         "✓"
                     } else {
                         "✗"
@@ -136,7 +136,7 @@ pub fn draw_status(
             .map(|(i, entry)| {
                 let (status_text, status_color) = match (&entry.action_type, entry.status) {
                     (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
-                        if entry.exit_code.map_or(false, |c| c == 0) {
+                        if entry.exit_code == Some(0) {
                             ("✓ Completed", Color::Green)
                         } else {
                             ("✗ Failed", Color::Red)
@@ -173,7 +173,7 @@ pub fn draw_status(
                         let is_down_or_failed = match dep_status {
                             Some(dep_entry) => match (&dep_entry.action_type, dep_entry.status) {
                                 (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
-                                    !dep_entry.exit_code.map_or(false, |c| c == 0)
+                                    dep_entry.exit_code != Some(0)
                                 }
                                 (Some(ServiceAction::Start { .. }), ProcessStatus::Exited) => true,
                                 (_, ProcessStatus::Exited) => true,
@@ -222,7 +222,7 @@ pub fn draw_status(
 
         f.render_widget(table, table_area);
 
-        let help_text = vec![
+        let help_text = [
             String::from("Press a number (1-9) to view a process"),
             String::from("Press 's' to move to service overview"),
             String::from("Press 'r' to restart current process"),
@@ -295,7 +295,7 @@ pub fn draw(
         let end = (panel.scroll + 1).min(filtered_lines.len());
         let text = filtered_lines[start..end]
             .iter()
-            .map(|(_, line)| format!("{}\n", line))
+            .map(|(_, line)| format!("{line}\n"))
             .collect::<Vec<String>>()
             .join("");
 

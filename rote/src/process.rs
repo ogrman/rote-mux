@@ -9,7 +9,8 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::panel::StreamKind;
+use crate::panel::{PanelIndex, StreamKind};
+use crate::signals::is_process_exited;
 use crate::ui::UiEvent;
 
 pub struct ServiceInstance {
@@ -23,20 +24,23 @@ pub struct ServiceInstance {
 
 impl ServiceInstance {
     pub fn spawn(
-        panel: usize,
+        panel: PanelIndex,
         cmd: &[String],
         cwd: Option<&str>,
         tx: mpsc::Sender<UiEvent>,
         shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-    ) -> Self {
+    ) -> std::io::Result<Self> {
         spawn_process(panel, cmd, cwd, tx, shutdown_rx)
     }
 
     pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
         self.exit_done.notified().await;
-        let result = self.exit_status.lock().unwrap().take().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::Other, "Exit status not set")
-        })??;
+        let result = self
+            .exit_status
+            .lock()
+            .unwrap()
+            .take()
+            .ok_or_else(|| std::io::Error::other("Exit status not set"))??;
         Ok(result)
     }
 
@@ -45,10 +49,7 @@ impl ServiceInstance {
         match status.as_ref() {
             None => Ok(None),
             Some(Ok(s)) => Ok(Some(*s)),
-            Some(Err(e)) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                e.to_string(),
-            )),
+            Some(Err(e)) => Err(std::io::Error::other(e.to_string())),
         }
     }
 
@@ -60,31 +61,22 @@ impl ServiceInstance {
 
         let _ = kill(pid, Signal::SIGINT);
         tokio::time::sleep(Duration::from_millis(300)).await;
-        if Self::check_process_exited(pid) {
+        if is_process_exited(pid) {
             return;
         }
 
         let _ = kill(pid, Signal::SIGTERM);
         tokio::time::sleep(Duration::from_millis(300)).await;
-        if Self::check_process_exited(pid) {
+        if is_process_exited(pid) {
             return;
         }
 
         let _ = kill(pid, Signal::SIGKILL);
     }
 
-    fn check_process_exited(pid: Pid) -> bool {
-        use nix::sys::signal::kill;
-        match kill(pid, None) {
-            Err(nix::Error::ESRCH) => true,
-            Ok(_) => false,
-            Err(_) => false,
-        }
-    }
-
     fn send_exit_event(
         tx: &mpsc::Sender<UiEvent>,
-        panel: usize,
+        panel: PanelIndex,
         result: &std::io::Result<std::process::ExitStatus>,
     ) {
         let exit_code = result.as_ref().ok().and_then(|s| s.code());
@@ -94,7 +86,7 @@ impl ServiceInstance {
         if is_ok {
             let _ = tx.try_send(UiEvent::Exited {
                 panel,
-                status: status.map(|s| s),
+                status,
                 exit_code,
             });
         } else {
@@ -107,128 +99,138 @@ impl ServiceInstance {
     }
 }
 
+/// Spawn a task that reads lines from a stream and sends them as events.
+fn spawn_stream_reader(
+    panel: PanelIndex,
+    stream: StreamKind,
+    lines: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    tx: mpsc::Sender<UiEvent>,
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut lines = lines;
+        loop {
+            tokio::select! {
+                result = lines.next_line() => {
+                    match result {
+                        Ok(Some(line)) => {
+                            let _ = tx.send(UiEvent::Line { panel, stream, text: line }).await;
+                        }
+                        _ => break,
+                    }
+                }
+                _ = shutdown_rx.recv() => break,
+            }
+        }
+    })
+}
+
+/// Spawn a task that reads lines from stderr and sends them as events.
+fn spawn_stderr_reader(
+    panel: PanelIndex,
+    lines: tokio::io::Lines<BufReader<tokio::process::ChildStderr>>,
+    tx: mpsc::Sender<UiEvent>,
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut lines = lines;
+        loop {
+            tokio::select! {
+                result = lines.next_line() => {
+                    match result {
+                        Ok(Some(line)) => {
+                            let _ = tx.send(UiEvent::Line { panel, stream: StreamKind::Stderr, text: line }).await;
+                        }
+                        _ => break,
+                    }
+                }
+                _ = shutdown_rx.recv() => break,
+            }
+        }
+    })
+}
+
+/// Spawn a task that waits for the child process to exit and sends an exit event.
+fn spawn_exit_waiter(
+    panel: PanelIndex,
+    mut child: tokio::process::Child,
+    tx: mpsc::Sender<UiEvent>,
+    exit_status: Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>>,
+    exit_done: Arc<Notify>,
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let result = tokio::select! {
+            _ = shutdown_rx.recv() => {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "Process was terminated",
+                ))
+            }
+            result = child.wait() => result,
+        };
+
+        *exit_status.lock().unwrap() = Some(result);
+        exit_done.notify_one();
+
+        ServiceInstance::send_exit_event(&tx, panel, exit_status.lock().unwrap().as_ref().unwrap());
+    })
+}
+
 fn spawn_process(
-    panel: usize,
+    panel: PanelIndex,
     cmd: &[String],
     cwd: Option<&str>,
     tx: mpsc::Sender<UiEvent>,
     shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-) -> ServiceInstance {
+) -> std::io::Result<ServiceInstance> {
+    // Configure command
     let mut command = Command::new(&cmd[0]);
     command
         .args(&cmd[1..])
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-
     if let Some(cwd) = cwd {
         command.current_dir(cwd);
     }
 
-    let mut child = command.spawn().expect("spawn failed");
-
-    let stdout = BufReader::new(child.stdout.take().unwrap()).lines();
-    let stderr = BufReader::new(child.stderr.take().unwrap()).lines();
-
-    let tx_out = tx.clone();
-    let tx_err = tx.clone();
-
-    let stdout_task = tokio::spawn({
-        let mut rx = shutdown_rx.resubscribe();
-        async move {
-            let mut lines = stdout;
-            loop {
-                tokio::select! {
-                    result = lines.next_line() => {
-                            match result {
-                                Ok(Some(line)) => {
-                                    // Ignore send errors - if channel is closed, we're shutting down
-                                    let _ = tx_out
-                                        .send(UiEvent::Line {
-                                            panel,
-                                            stream: StreamKind::Stdout,
-                                            text: line,
-                                        })
-                                        .await;
-                                }
-                                _ => break,
-                            }
-                    }
-                    _ = rx.recv() => {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-
-    let stderr_task = tokio::spawn({
-        let mut rx = shutdown_rx.resubscribe();
-        async move {
-            let mut lines = stderr;
-            loop {
-                tokio::select! {
-                    result = lines.next_line() => {
-                        match result {
-                            Ok(Some(line)) => {
-                                // Ignore send errors - if channel is closed, we're shutting down
-                                let _ = tx_err
-                                    .send(UiEvent::Line {
-                                        panel,
-                                        stream: StreamKind::Stderr,
-                                        text: line,
-                                    })
-                                    .await;
-                            }
-                            _ => break,
-                        }
-                    }
-                    _ = rx.recv() => {
-                        break;
-                    }
-                }
-            }
-        }
-    });
-
+    // Spawn process
+    let mut child = command.spawn()?;
     let pid = child.id();
 
+    // Take stdout/stderr handles
+    let stdout = BufReader::new(child.stdout.take().expect("stdout should be piped")).lines();
+    let stderr = BufReader::new(child.stderr.take().expect("stderr should be piped")).lines();
+
+    // Spawn stream reader tasks
+    let stdout_task = spawn_stream_reader(
+        panel,
+        StreamKind::Stdout,
+        stdout,
+        tx.clone(),
+        shutdown_rx.resubscribe(),
+    );
+    let stderr_task = spawn_stderr_reader(panel, stderr, tx.clone(), shutdown_rx.resubscribe());
+
+    // Spawn exit waiter task
     let exit_status: Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>> =
         Arc::new(Mutex::new(None));
     let exit_done = Arc::new(Notify::new());
+    let wait_task = spawn_exit_waiter(
+        panel,
+        child,
+        tx,
+        exit_status.clone(),
+        exit_done.clone(),
+        shutdown_rx.resubscribe(),
+    );
 
-    let exit_status_clone = exit_status.clone();
-    let exit_done_clone = exit_done.clone();
-    let wait_task = tokio::spawn({
-        let mut rx = shutdown_rx.resubscribe();
-        let tx_clone = tx.clone();
-        async move {
-            let result = tokio::select! {
-                _ = rx.recv() => {
-                    Err(std::io::Error::new(
-                        std::io::ErrorKind::Interrupted,
-                        "Process was terminated",
-                    ))
-                }
-                result = child.wait() => result,
-            };
-
-            *exit_status_clone.lock().unwrap() = Some(result);
-            exit_done_clone.notify_one();
-
-            ServiceInstance::send_exit_event(
-                &tx_clone,
-                panel,
-                exit_status_clone.lock().unwrap().as_ref().unwrap(),
-            );
-        }
-    });
-
-    ServiceInstance {
+    Ok(ServiceInstance {
         pid,
         stdout_task,
         stderr_task,
         wait_task,
         exit_status,
         exit_done,
-    }
+    })
 }

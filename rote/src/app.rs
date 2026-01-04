@@ -1,9 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    io,
-    path::PathBuf,
-    time::Duration,
-};
+use std::{collections::HashMap, io, path::PathBuf, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -20,9 +15,11 @@ const SHUTDOWN_CHECK_INTERVAL_MS: u64 = 100;
 
 use crate::{
     config::{Config, ServiceAction},
-    panel::{MessageKind, Panel, StatusPanel, StreamKind},
+    panel::{MessageKind, Panel, PanelIndex, StatusPanel, StreamKind},
     process::ServiceInstance,
     render,
+    service_manager::{ServiceManager, resolve_dependencies},
+    signals::is_process_exited_by_pid,
     ui::{ProcessStatus, UiEvent},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -36,7 +33,7 @@ fn format_timestamp(timestamps: bool) -> Option<String> {
         let hours = (now % 86400) / 3600;
         let minutes = (now % 3600) / 60;
         let seconds = now % 60;
-        Some(format!("{:02}:{:02}:{:02}", hours, minutes, seconds))
+        Some(format!("{hours:02}:{minutes:02}:{seconds:02}"))
     } else {
         None
     }
@@ -54,7 +51,7 @@ async fn wait_for_shutdown(
         let mut all_exited = true;
         for (i, proc) in procs.iter_mut().enumerate() {
             if let Some(p) = proc {
-                if p.pid.is_none() || check_process_exited_by_pid(p.pid) {
+                if p.pid.is_none() || is_process_exited_by_pid(p.pid) {
                     // Process has exited
                     status_panel
                         .update_entry(panels[i].service_name.clone(), ProcessStatus::Exited);
@@ -72,20 +69,6 @@ async fn wait_for_shutdown(
         }
 
         tokio::time::sleep(Duration::from_millis(SHUTDOWN_CHECK_INTERVAL_MS)).await;
-    }
-}
-
-fn check_process_exited_by_pid(pid: Option<u32>) -> bool {
-    use nix::sys::signal::kill;
-    use nix::unistd::Pid;
-    let Some(pid) = pid else {
-        return true;
-    };
-    let pid = Pid::from_raw(pid as i32);
-    match kill(pid, None) {
-        Err(nix::Error::ESRCH) => true, // Process does not exist
-        Ok(_) => false,                 // Process still exists
-        Err(_) => false,
     }
 }
 
@@ -133,18 +116,11 @@ pub async fn run_with_input(
     // Resolve all dependencies to get the full list of services to start
     let services_list = resolve_dependencies(&config, &target_services)?;
 
-    // Create panels for services with "start" or "run" actions
+    // Create panels for ALL services with actions (not just those being started)
     let mut panels = Vec::new();
-    let mut service_to_panel: HashMap<String, usize> = HashMap::new();
+    let mut service_to_panel: HashMap<String, PanelIndex> = HashMap::new();
 
-    for service_name in &services_list {
-        let service_config = config.services.get(service_name).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Service '{}' not found", service_name),
-            )
-        })?;
-
+    for (service_name, service_config) in &config.services {
         // Create panels for services with "start" or "run" actions
         if let Some(ServiceAction::Start { command }) | Some(ServiceAction::Run { command }) =
             &service_config.action
@@ -152,7 +128,7 @@ pub async fn run_with_input(
             let cmd = shell_words::split(&command.as_command()).map_err(|e| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("Failed to parse command: {}", e),
+                    format!("Failed to parse command: {e}"),
                 )
             })?;
 
@@ -175,7 +151,7 @@ pub async fn run_with_input(
                 }
             };
 
-            service_to_panel.insert(service_name.clone(), panels.len());
+            service_to_panel.insert(service_name.clone(), PanelIndex::new(panels.len()));
             panels.push(Panel::new(
                 service_name.clone(),
                 cmd,
@@ -189,49 +165,44 @@ pub async fn run_with_input(
 
     if panels.is_empty() {
         disable_raw_mode()?;
-        eprintln!("No services with 'start' action to display");
+        eprintln!("No services with 'start' or 'run' action to display");
         return Ok(());
     }
 
     // Initialize status panel with all services that have actions
     let mut status_panel = StatusPanel::new();
-    for service_name in &services_list {
-        let service_config = config.services.get(service_name).unwrap();
-
-        match &service_config.action {
-            Some(action) => {
-                status_panel.update_entry_with_action(
-                    service_name.clone(),
-                    ProcessStatus::Running,
-                    action.clone(),
-                );
-                status_panel
-                    .entry_indices
-                    .insert(service_name.clone(), usize::MAX);
-                status_panel
-                    .update_dependencies(service_name.clone(), service_config.require.clone());
-            }
-            None => {}
+    for (service_name, service_config) in &config.services {
+        if let Some(action) = &service_config.action {
+            // Services in services_list are being started, others show as "Pending"
+            let initial_status = if services_list.contains(service_name) {
+                ProcessStatus::Running
+            } else {
+                ProcessStatus::Exited // Will show as not started
+            };
+            status_panel.update_entry_with_action(
+                service_name.clone(),
+                initial_status,
+                action.clone(),
+            );
+            status_panel
+                .entry_indices
+                .insert(service_name.clone(), usize::MAX);
+            status_panel.update_dependencies(service_name.clone(), service_config.require.clone());
         }
     }
 
-    // Start processes according to dependencies
+    // Initialize process slots
     let mut procs: Vec<Option<ServiceInstance>> = (0..panels.len()).map(|_| None).collect();
-    start_services(
-        &config,
-        &services_list,
-        &service_to_panel,
-        &panels,
-        &mut procs,
-        tx.clone(),
-        &shutdown_tx,
-        &mut status_panel,
-    )
-    .await?;
 
-    let mut active = 0;
+    // Service manager tracks pending services and completed Run services
+    let mut service_manager = ServiceManager::new(services_list.clone(), service_to_panel.clone());
+
+    let mut active = PanelIndex::new(0);
     let mut showing_status = true;
     let mut prev_statuses_storage: Option<Vec<ProcessStatus>> = None;
+
+    // Trigger initial service startup
+    let _ = tx.send(UiEvent::StartNextService).await;
 
     // Periodic status check task
     let status_check_tx = internal_tx.clone();
@@ -249,26 +220,31 @@ pub async fn run_with_input(
         let tx_kb = tx.clone();
         Some(tokio::spawn(async move {
             loop {
-                if event::poll(Duration::from_millis(KEYBOARD_POLL_INTERVAL_MS)).unwrap() {
-                    if let Event::Key(k) = event::read().unwrap() {
-                        let ev = match k.code {
-                            KeyCode::Char('q') => UiEvent::Exit,
-                            KeyCode::Char('r') => UiEvent::Restart,
-                            KeyCode::Char('o') => UiEvent::ToggleStdout,
-                            KeyCode::Char('e') => UiEvent::ToggleStderr,
-                            KeyCode::Char('s') => UiEvent::SwitchToStatus,
-                            KeyCode::Char(c @ '1'..='9') => {
-                                UiEvent::SwitchPanel((c as u8 - b'1') as usize)
-                            }
-                            KeyCode::Up => UiEvent::Scroll(-1),
-                            KeyCode::Down => UiEvent::Scroll(1),
-                            KeyCode::PageUp => UiEvent::Scroll(-20),
-                            KeyCode::PageDown => UiEvent::Scroll(20),
-                            _ => continue,
-                        };
-                        // Ignore send errors - if channel is closed, we're shutting down
-                        let _ = tx_kb.send(ev).await;
+                let poll_result = event::poll(Duration::from_millis(KEYBOARD_POLL_INTERVAL_MS));
+                match poll_result {
+                    Ok(true) => {
+                        if let Ok(Event::Key(k)) = event::read() {
+                            let ev = match k.code {
+                                KeyCode::Char('q') => UiEvent::Exit,
+                                KeyCode::Char('r') => UiEvent::Restart,
+                                KeyCode::Char('o') => UiEvent::ToggleStdout,
+                                KeyCode::Char('e') => UiEvent::ToggleStderr,
+                                KeyCode::Char('s') => UiEvent::SwitchToStatus,
+                                KeyCode::Char(c @ '1'..='9') => {
+                                    UiEvent::SwitchPanel(PanelIndex::new((c as u8 - b'1') as usize))
+                                }
+                                KeyCode::Up => UiEvent::Scroll(-1),
+                                KeyCode::Down => UiEvent::Scroll(1),
+                                KeyCode::PageUp => UiEvent::Scroll(-20),
+                                KeyCode::PageDown => UiEvent::Scroll(20),
+                                _ => continue,
+                            };
+                            // Ignore send errors - if channel is closed, we're shutting down
+                            let _ = tx_kb.send(ev).await;
+                        }
                     }
+                    Ok(false) => {}  // No event available
+                    Err(_) => break, // Terminal error, exit keyboard loop
                 }
             }
         }))
@@ -279,7 +255,7 @@ pub async fn run_with_input(
     if showing_status {
         render::draw_status(&mut terminal, &panels, &status_panel)?;
     } else {
-        render::draw(&mut terminal, &panels[active], &status_panel)?;
+        render::draw(&mut terminal, &panels[*active], &status_panel)?;
     }
 
     loop {
@@ -303,7 +279,7 @@ pub async fn run_with_input(
                 stream,
                 text,
             } => {
-                let p = &mut panels[panel];
+                let p = &mut panels[*panel];
                 let at_bottom = p.follow;
 
                 let kind = match stream {
@@ -331,16 +307,30 @@ pub async fn run_with_input(
                     "[exited: {}]",
                     status.map(|s| s.to_string()).unwrap_or("unknown".into())
                 );
-                let timestamp = format_timestamp(panels[panel].timestamps);
-                panels[panel]
+                let timestamp = format_timestamp(panels[*panel].timestamps);
+                panels[*panel]
                     .messages
                     .push(MessageKind::Status, &msg, timestamp.as_deref());
-                status_panel.update_exit_code(panels[panel].service_name.clone(), exit_code);
+                status_panel.update_exit_code(panels[*panel].service_name.clone(), exit_code);
+
+                // If this was a Run service, mark it as completed and try to start more services
+                let service_name = &panels[*panel].service_name;
+                if let Some(service_config) = config.services.get(service_name) {
+                    if matches!(service_config.action, Some(ServiceAction::Run { .. })) {
+                        // Only mark as completed if it succeeded
+                        if exit_code == Some(0) {
+                            service_manager.mark_run_completed(service_name);
+                            // Try to start more services
+                            let _ = tx.send(UiEvent::StartNextService).await;
+                        }
+                    }
+                }
+
                 redraw = true;
             }
 
             UiEvent::Scroll(delta) => {
-                let p = &mut panels[active];
+                let p = &mut panels[*active];
                 let max = p.visible_len().saturating_sub(1);
                 let new = (p.scroll as i32 + delta).clamp(0, max as i32) as usize;
                 p.follow = new == max;
@@ -349,20 +339,20 @@ pub async fn run_with_input(
             }
 
             UiEvent::ToggleStdout => {
-                let p = &mut panels[active];
+                let p = &mut panels[*active];
                 p.show_stdout = !p.show_stdout;
                 toggle_stream_visibility(p, p.show_stdout);
                 redraw = true;
             }
 
             UiEvent::ToggleStderr => {
-                let p = &mut panels[active];
+                let p = &mut panels[*active];
                 p.show_stderr = !p.show_stderr;
                 toggle_stream_visibility(p, p.show_stderr);
                 redraw = true;
             }
 
-            UiEvent::SwitchPanel(i) if i < panels.len() => {
+            UiEvent::SwitchPanel(i) if *i < panels.len() => {
                 active = i;
                 showing_status = false;
                 redraw = true;
@@ -383,7 +373,7 @@ pub async fn run_with_input(
 
                 for (i, proc) in procs.iter_mut().enumerate() {
                     let current_status = if let Some(p) = proc {
-                        if p.pid.is_none() || check_process_exited_by_pid(p.pid) {
+                        if p.pid.is_none() || is_process_exited_by_pid(p.pid) {
                             ProcessStatus::Exited
                         } else {
                             ProcessStatus::Running
@@ -412,33 +402,45 @@ pub async fn run_with_input(
             }
 
             UiEvent::Restart => {
-                if let Some(proc) = procs[active].take() {
+                if let Some(proc) = procs[*active].take() {
                     proc.terminate().await;
                     let _ = proc.wait_task.await;
                 }
 
-                status_panel.update_exit_code(panels[active].service_name.clone(), None);
-                let was_following = panels[active].follow;
-                let timestamp = format_timestamp(panels[active].timestamps);
-                panels[active].messages.push(
+                status_panel.update_exit_code(panels[*active].service_name.clone(), None);
+                let was_following = panels[*active].follow;
+                let timestamp = format_timestamp(panels[*active].timestamps);
+                panels[*active].messages.push(
                     MessageKind::Status,
                     "[restarting]",
                     timestamp.as_deref(),
                 );
-                let max_len = panels[active].visible_len();
+                let max_len = panels[*active].visible_len();
                 if max_len > 0 && was_following {
-                    panels[active].scroll = max_len - 1;
+                    panels[*active].scroll = max_len - 1;
                 }
-                panels[active].follow = was_following;
+                panels[*active].follow = was_following;
 
-                let cwd = panels[active].cwd.as_deref();
-                procs[active] = Some(ServiceInstance::spawn(
+                let cwd = panels[*active].cwd.as_deref();
+                match ServiceInstance::spawn(
                     active,
-                    &panels[active].cmd,
+                    &panels[*active].cmd,
                     cwd,
                     tx.clone(),
                     shutdown_tx.subscribe(),
-                ));
+                ) {
+                    Ok(proc) => {
+                        procs[*active] = Some(proc);
+                    }
+                    Err(e) => {
+                        let timestamp = format_timestamp(panels[*active].timestamps);
+                        panels[*active].messages.push(
+                            MessageKind::Status,
+                            &format!("[spawn failed: {e}]"),
+                            timestamp.as_deref(),
+                        );
+                    }
+                }
                 redraw = true;
             }
 
@@ -455,10 +457,8 @@ pub async fn run_with_input(
                 }
 
                 // Terminate all processes
-                for p in procs.iter_mut() {
-                    if let Some(proc) = p {
-                        proc.terminate().await;
-                    }
+                for proc in procs.iter_mut().flatten() {
+                    proc.terminate().await;
                 }
 
                 // Switch to showing shutdown progress
@@ -487,6 +487,47 @@ pub async fn run_with_input(
                 }
             }
 
+            UiEvent::StartNextService => {
+                // Try to start the next service(s) whose dependencies are satisfied
+                let ready_services = service_manager.take_ready_services(&config);
+                let mut started_any = false;
+
+                for service_name in ready_services {
+                    if let Some(panel_idx) = service_manager.get_panel_index(&service_name) {
+                        let panel = &panels[*panel_idx];
+                        let cwd = panel.cwd.as_deref();
+                        match ServiceInstance::spawn(
+                            panel_idx,
+                            &panel.cmd,
+                            cwd,
+                            tx.clone(),
+                            shutdown_tx.subscribe(),
+                        ) {
+                            Ok(proc) => {
+                                procs[*panel_idx] = Some(proc);
+                                status_panel
+                                    .update_entry(service_name.clone(), ProcessStatus::Running);
+                                started_any = true;
+                            }
+                            Err(e) => {
+                                let timestamp = format_timestamp(panels[*panel_idx].timestamps);
+                                panels[*panel_idx].messages.push(
+                                    MessageKind::Status,
+                                    &format!("[spawn failed: {e}]"),
+                                    timestamp.as_deref(),
+                                );
+                                status_panel
+                                    .update_entry(service_name.clone(), ProcessStatus::Exited);
+                            }
+                        }
+                    }
+                }
+
+                if started_any {
+                    redraw = true;
+                }
+            }
+
             _ => {}
         }
 
@@ -494,17 +535,15 @@ pub async fn run_with_input(
             if showing_status {
                 render::draw_status(&mut terminal, &panels, &status_panel)?;
             } else {
-                render::draw(&mut terminal, &panels[active], &status_panel)?;
+                render::draw(&mut terminal, &panels[*active], &status_panel)?;
             }
         }
     }
 
-    for p in procs.iter() {
-        if let Some(proc) = p {
-            proc.stdout_task.abort();
-            proc.stderr_task.abort();
-            proc.wait_task.abort();
-        }
+    for proc in procs.iter().flatten() {
+        proc.stdout_task.abort();
+        proc.stderr_task.abort();
+        proc.wait_task.abort();
     }
 
     if enable_terminal {
@@ -527,68 +566,9 @@ fn toggle_stream_visibility(panel: &mut Panel, show: bool) {
     }
 }
 
-fn resolve_dependencies(config: &Config, targets: &[String]) -> io::Result<Vec<String>> {
-    let mut result = Vec::new();
-    let mut visited = HashSet::new();
-    let mut temp_mark = HashSet::new();
-
-    fn visit(
-        service: &str,
-        config: &Config,
-        result: &mut Vec<String>,
-        visited: &mut HashSet<String>,
-        temp_mark: &mut HashSet<String>,
-    ) -> io::Result<()> {
-        if visited.contains(service) {
-            return Ok(());
-        }
-
-        if temp_mark.contains(service) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "Circular dependency detected involving service '{}'",
-                    service
-                ),
-            ));
-        }
-
-        temp_mark.insert(service.to_string());
-
-        let service_config = config.services.get(service).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Service '{}' not found in config", service),
-            )
-        })?;
-
-        // Visit dependencies first
-        for dep in &service_config.require {
-            visit(dep, config, result, visited, temp_mark)?;
-        }
-
-        temp_mark.remove(service);
-        visited.insert(service.to_string());
-        result.push(service.to_string());
-
-        Ok(())
-    }
-
-    for target in targets {
-        visit(target, config, &mut result, &mut visited, &mut temp_mark)?;
-    }
-
-    Ok(result)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_check_process_exited_by_pid_none() {
-        assert!(check_process_exited_by_pid(None));
-    }
 
     #[test]
     fn test_visible_len_empty_panel() {
@@ -979,76 +959,4 @@ mod tests {
         assert!(result.contains(&"dep2".to_string()));
         assert_eq!(result[3], "service1");
     }
-}
-
-async fn start_services(
-    config: &Config,
-    services_list: &[String],
-    service_to_panel: &HashMap<String, usize>,
-    panels: &[Panel],
-    procs: &mut Vec<Option<ServiceInstance>>,
-    tx: tokio::sync::mpsc::Sender<UiEvent>,
-    shutdown_tx: &tokio::sync::broadcast::Sender<()>,
-    status_panel: &mut StatusPanel,
-) -> io::Result<()> {
-    for service_name in services_list {
-        let service_config = config.services.get(service_name).unwrap();
-
-        match &service_config.action {
-            Some(ServiceAction::Run { .. }) => {
-                // Run to completion - spawn and wait like start, but track as run task
-                if let Some(&panel_idx) = service_to_panel.get(service_name) {
-                    let panel = &panels[panel_idx];
-                    let cwd = panel.cwd.as_deref();
-                    let panel_name = panel.service_name.clone();
-
-                    // Spawn the process
-                    procs[panel_idx] = Some(ServiceInstance::spawn(
-                        panel_idx,
-                        &panel.cmd,
-                        cwd,
-                        tx.clone(),
-                        shutdown_tx.subscribe(),
-                    ));
-
-                    // Wait for it to complete
-                    if let Some(proc) = &mut procs[panel_idx] {
-                        let exit_status = proc.wait().await?;
-                        let exit_code = exit_status.code();
-                        status_panel.update_entry(panel_name.clone(), ProcessStatus::Exited);
-                        status_panel.update_exit_code(panel_name, exit_code);
-
-                        if !exit_status.success() {
-                            return Err(io::Error::new(
-                                io::ErrorKind::Other,
-                                format!(
-                                    "Service '{}' failed with exit code: {:?}",
-                                    service_name, exit_code
-                                ),
-                            ));
-                        }
-                    }
-                }
-            }
-            Some(ServiceAction::Start { .. }) => {
-                // Start long-running service
-                if let Some(&panel_idx) = service_to_panel.get(service_name) {
-                    let panel = &panels[panel_idx];
-                    let cwd = panel.cwd.as_deref();
-                    procs[panel_idx] = Some(ServiceInstance::spawn(
-                        panel_idx,
-                        &panel.cmd,
-                        cwd,
-                        tx.clone(),
-                        shutdown_tx.subscribe(),
-                    ));
-                }
-            }
-            None => {
-                // No action - just a dependency aggregator
-            }
-        }
-    }
-
-    Ok(())
 }

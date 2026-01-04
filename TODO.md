@@ -74,18 +74,29 @@ TODO Format:
       services spawn processes and wait for completion, capturing output to the
       panel. The output remains viewable even after the task completes.
 
-[   ] Add option to show timestamps for messages in config format. When it
+[ X ] Add option to show timestamps for messages in config format. When it
       is enabled all logs should have the current time prepended to the line.
 
-      Config option added and MessageBuf::push signature updated to accept
-      optional timestamp, but full implementation requires updating all message
-      push callsites throughout codebase.
+      Implementation complete. The `timestamps: true` config option enables
+      HH:MM:SS timestamps prepended to all log messages. format_timestamp()
+      in app.rs generates timestamps, and all message push callsites pass
+      timestamps to MessageBuf::push().
 
-[   ] Even services that have not been started should have a panel. Change the
+[ X ] Even services that have not been started should have a panel. Change the
       semantics of the restart command so that it can be used to start a
       service that was never started. There should be a 1:1 mapping for service
       to panel.
 
-[   ] Services should be started asynchronously -- calculate which ones should
+      Panels are now created for all services with actions in config.services,
+      not just those in the resolved dependency list. The restart command can
+      start services that weren't initially started. Status panel shows all
+      services with their initial status based on whether they're being started.
+
+[ X ] Services should be started asynchronously -- calculate which ones should
       be started automatically when the application starts and then go straight
       to the status screen.
+
+      Replaced blocking start_services() with event-driven startup. Services
+      start via StartNextService events in the main event loop. Run services
+      track completion in completed_run_services set, and dependent services
+      start once their Run dependencies complete. Status screen shown immediately.

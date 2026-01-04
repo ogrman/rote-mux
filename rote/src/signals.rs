@@ -2,11 +2,22 @@ use nix::sys::signal::kill;
 use nix::unistd::Pid;
 use std::time::Duration;
 
-fn check_process_exited(pid: Pid) -> bool {
+/// Check if a process has exited by sending signal 0.
+/// Returns true if the process does not exist (has exited).
+pub fn is_process_exited(pid: Pid) -> bool {
     match kill(pid, None) {
-        Err(nix::Error::ESRCH) => true,
-        Ok(_) => false,
-        Err(_) => false,
+        Err(nix::Error::ESRCH) => true, // Process does not exist
+        Ok(_) => false,                 // Process still exists
+        Err(_) => false,                // Other error, assume running
+    }
+}
+
+/// Check if a process has exited by PID.
+/// Returns true if pid is None or the process does not exist.
+pub fn is_process_exited_by_pid(pid: Option<u32>) -> bool {
+    match pid {
+        None => true,
+        Some(p) => is_process_exited(Pid::from_raw(p as i32)),
     }
 }
 
@@ -18,7 +29,7 @@ pub async fn wait_for_child_exit(pid: Option<u32>) -> bool {
 
     for _ in 0..50 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if check_process_exited(pid) {
+        if is_process_exited(pid) {
             return true;
         }
     }
@@ -73,10 +84,26 @@ mod tests {
     }
 
     #[test]
-    fn test_check_process_exited_nonexistent() {
+    fn test_is_process_exited_nonexistent() {
         let pid = Pid::from_raw(999999);
         assert!(
-            check_process_exited(pid),
+            is_process_exited(pid),
+            "Nonexistent process should be considered exited"
+        );
+    }
+
+    #[test]
+    fn test_is_process_exited_by_pid_none() {
+        assert!(
+            is_process_exited_by_pid(None),
+            "None pid should be considered exited"
+        );
+    }
+
+    #[test]
+    fn test_is_process_exited_by_pid_nonexistent() {
+        assert!(
+            is_process_exited_by_pid(Some(999999)),
             "Nonexistent process should be considered exited"
         );
     }

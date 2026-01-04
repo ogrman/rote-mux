@@ -2,7 +2,7 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
 
-use rote::panel::{MessageKind, Panel, StreamKind};
+use rote::panel::{MessageKind, Panel, PanelIndex, StreamKind};
 use rote::process::ServiceInstance;
 use rote::ui::UiEvent;
 
@@ -26,7 +26,9 @@ async fn test_panel_stderr_buffer() {
         false, // timestamps
     );
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -42,15 +44,12 @@ async fn test_panel_stderr_buffer() {
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
-                match event {
-                    UiEvent::Line { stream, text, .. } => {
-                        let kind = match stream {
-                            StreamKind::Stdout => MessageKind::Stdout,
-                            StreamKind::Stderr => MessageKind::Stderr,
-                        };
-                        panel.messages.push(kind, &text, None);
-                    }
-                    _ => {}
+                if let UiEvent::Line { stream, text, .. } = event {
+                    let kind = match stream {
+                        StreamKind::Stdout => MessageKind::Stdout,
+                        StreamKind::Stderr => MessageKind::Stderr,
+                    };
+                    panel.messages.push(kind, &text, None);
                 }
             }
             _ = &mut deadline => break,
@@ -83,7 +82,9 @@ async fn test_continuous_output() {
         "for i in 1 2 3 4 5; do echo \"output $i\"; sleep 0.05; done".to_string(),
     ];
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     // Don't wait for process to complete, but collect output as it comes
     let mut stdout_lines = Vec::new();
@@ -95,11 +96,8 @@ async fn test_continuous_output() {
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
-                match event {
-                    UiEvent::Line { stream: StreamKind::Stdout, text, .. } => {
-                        stdout_lines.push(text);
-                    }
-                    _ => {}
+                if let UiEvent::Line { stream: StreamKind::Stdout, text, .. } = event {
+                    stdout_lines.push(text);
                 }
             }
             result = proc.wait(), if !process_done => {
@@ -139,7 +137,9 @@ async fn test_visible_len_calculation() {
         false, // timestamps
     );
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -155,15 +155,12 @@ async fn test_visible_len_calculation() {
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
-                match event {
-                    UiEvent::Line { stream, text, .. } => {
-                        let kind = match stream {
-                            StreamKind::Stdout => MessageKind::Stdout,
-                            StreamKind::Stderr => MessageKind::Stderr,
-                        };
-                        panel.messages.push(kind, &text, None);
-                    }
-                    _ => {}
+                if let UiEvent::Line { stream, text, .. } = event {
+                    let kind = match stream {
+                        StreamKind::Stdout => MessageKind::Stdout,
+                        StreamKind::Stderr => MessageKind::Stderr,
+                    };
+                    panel.messages.push(kind, &text, None);
                 }
             }
             _ = &mut deadline => break,
@@ -209,7 +206,9 @@ async fn test_scroll_with_continuous_output() {
         false, // timestamps
     );
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     // Simulate the scroll update logic from app.rs
     let mut scroll = 0;
@@ -221,21 +220,18 @@ async fn test_scroll_with_continuous_output() {
     loop {
         tokio::select! {
             Some(event) = rx.recv() => {
-                match event {
-                    UiEvent::Line { stream, text, .. } => {
-                        let at_bottom = follow;
+                if let UiEvent::Line { stream, text, .. } = event {
+                    let at_bottom = follow;
 
-                        let kind = match stream {
-                            StreamKind::Stdout => MessageKind::Stdout,
-                            StreamKind::Stderr => MessageKind::Stderr,
-                        };
-                        panel.messages.push(kind, &text, None);
+                    let kind = match stream {
+                        StreamKind::Stdout => MessageKind::Stdout,
+                        StreamKind::Stderr => MessageKind::Stderr,
+                    };
+                    panel.messages.push(kind, &text, None);
 
-                        if at_bottom {
-                            scroll = panel.visible_len().saturating_sub(1);
-                        }
+                    if at_bottom {
+                        scroll = panel.visible_len().saturating_sub(1);
                     }
-                    _ => {}
                 }
             }
             result = proc.wait() => {
@@ -277,7 +273,9 @@ async fn test_draw_logic_with_few_lines() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -349,7 +347,9 @@ async fn test_draw_logic_with_scrolling() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -421,7 +421,9 @@ async fn test_mixed_output_order_preservation() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, true, false);
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -588,7 +590,9 @@ async fn test_colored_output() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -665,7 +669,9 @@ async fn test_visible_len_with_stream_toggles() {
 
     let mut panel = Panel::new("test".to_string(), cmd.clone(), None, true, false, false);
 
-    let mut proc = ServiceInstance::spawn(0, &cmd, None, tx, shutdown_tx.subscribe());
+    let mut proc =
+        ServiceInstance::spawn(PanelIndex::new(0), &cmd, None, tx, shutdown_tx.subscribe())
+            .expect("spawn failed");
 
     let status = timeout(Duration::from_secs(2), proc.wait())
         .await
@@ -705,7 +711,7 @@ async fn test_visible_len_with_stream_toggles() {
     // Now should show 4 lines (2 stdout + 2 stderr)
     assert_eq!(panel.visible_len(), 4);
     assert_eq!(panel.scroll, 3, "Scroll should be at bottom");
-    assert_eq!(panel.follow, true, "Should be following");
+    assert!(panel.follow, "Should be following");
 
     // Toggle stderr off
     panel.show_stderr = false;
@@ -716,7 +722,7 @@ async fn test_visible_len_with_stream_toggles() {
     // Back to 2 stdout lines
     assert_eq!(panel.visible_len(), 2);
     assert_eq!(panel.scroll, 1, "Scroll should be clamped to bottom");
-    assert_eq!(panel.follow, true, "Should still be following");
+    assert!(panel.follow, "Should still be following");
 
     // Toggle stdout off
     panel.show_stdout = false;
@@ -737,7 +743,7 @@ async fn test_visible_len_with_stream_toggles() {
     // Back to 2 lines, should be at bottom
     assert_eq!(panel.visible_len(), 2);
     assert_eq!(panel.scroll, 1, "Scroll should be at bottom");
-    assert_eq!(panel.follow, true, "Should be following");
+    assert!(panel.follow, "Should be following");
 }
 
 #[tokio::test]
@@ -750,21 +756,30 @@ async fn test_terminate_multiple_processes() {
     let cmd2 = vec!["sleep".to_string(), "0.1".to_string()];
     let cmd3 = vec!["sleep".to_string(), "0.1".to_string()];
 
-    let mut proc1 = ServiceInstance::spawn(0, &cmd1, None, tx.clone(), shutdown_tx.subscribe());
+    let mut proc1 = ServiceInstance::spawn(
+        PanelIndex::new(0),
+        &cmd1,
+        None,
+        tx.clone(),
+        shutdown_tx.subscribe(),
+    )
+    .expect("spawn failed");
     let mut proc2 = ServiceInstance::spawn(
-        1,
+        PanelIndex::new(1),
         &cmd2,
         None,
         tx.clone(),
         shutdown_tx.subscribe().resubscribe(),
-    );
+    )
+    .expect("spawn failed");
     let mut proc3 = ServiceInstance::spawn(
-        2,
+        PanelIndex::new(2),
         &cmd3,
         None,
         tx.clone(),
         shutdown_tx.subscribe().resubscribe(),
-    );
+    )
+    .expect("spawn failed");
 
     // Give processes time to start
     tokio::time::sleep(Duration::from_millis(50)).await;

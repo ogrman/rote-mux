@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
     if args.generate_example {
-        println!("{}", EXAMPLE_YAML);
+        println!("{EXAMPLE_YAML}");
         return Ok(());
     }
 
