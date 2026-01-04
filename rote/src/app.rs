@@ -328,11 +328,22 @@ pub async fn run_with_input(
                     }
 
                     // Auto-restart if configured (only for Start services, not Run services)
-                    // Skip if a process is already running (e.g., manual restart already happened)
-                    if service_config.autorestart
+                    // Skip if a new process is already running (e.g., manual restart already happened)
+                    let should_auto_restart = service_config.autorestart
                         && matches!(service_config.action, Some(ServiceAction::Start { .. }))
-                        && procs[*panel].is_none()
-                    {
+                        && procs[*panel]
+                            .as_ref()
+                            .map(|p| is_process_exited_by_pid(p.pid))
+                            .unwrap_or(true);
+
+                    if should_auto_restart {
+                        // Wait for the old process to fully clean up
+                        if let Some(proc) = procs[*panel].take() {
+                            let _ = proc.wait_task.await;
+                            let _ = proc.stdout_task.await;
+                            let _ = proc.stderr_task.await;
+                        }
+
                         let p = &mut panels[*panel];
                         let was_following = p.follow;
                         let timestamp = format_timestamp(p.timestamps);
