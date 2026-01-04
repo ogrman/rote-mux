@@ -58,6 +58,36 @@ pub fn draw_shutdown(
     Ok(())
 }
 
+fn render_service_status(status_panel: &StatusPanel) -> Paragraph<'static> {
+    let (healthy, total, has_issues) = status_panel.get_health_status();
+
+    let status_text = if total > 0 {
+        let status_icon = if has_issues { "⚠" } else { "✓" };
+        let status_style = if has_issues {
+            Style::default().fg(Color::Red)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+        Line::from(vec![
+            Span::styled(
+                format!("{} {}/{}", status_icon, healthy, total),
+                status_style,
+            ),
+            Span::raw(" healthy"),
+        ])
+    } else {
+        Line::from("No services")
+    };
+
+    Paragraph::new(status_text)
+        .alignment(Alignment::Left)
+        .block(
+            Block::default()
+                .title("Service status")
+                .borders(Borders::ALL),
+        )
+}
+
 pub fn draw_status(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     _panels: &[Panel],
@@ -73,27 +103,16 @@ pub fn draw_status(
             .split(area);
 
         let main_area = chunks[0];
-        let help_area = chunks[1];
+        let sidebar_area = chunks[1];
 
-        let (healthy, total, has_issues) = status_panel.get_health_status();
+        // Split sidebar into status and help sections
+        let sidebar_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .split(sidebar_area);
 
-        let status_summary = if total > 0 {
-            let status_icon = if has_issues { "⚠" } else { "✓" };
-            let status_style = if has_issues {
-                Style::default().fg(Color::Red)
-            } else {
-                Style::default().fg(Color::Green)
-            };
-            Line::from(vec![
-                Span::styled(
-                    format!(" {} {}/{}", status_icon, healthy, total),
-                    status_style,
-                ),
-                Span::raw(" services healthy"),
-            ])
-        } else {
-            Line::from(" No services")
-        };
+        let status_area = sidebar_chunks[0];
+        let help_area = sidebar_chunks[1];
 
         let header_style = Style::default()
             .fg(Color::Reset)
@@ -195,9 +214,13 @@ pub fn draw_status(
             ],
         )
         .header(header)
-        .block(Block::default().title(status_summary).borders(Borders::ALL));
+        .block(Block::default().title("Services").borders(Borders::ALL));
 
         f.render_widget(table, main_area);
+
+        // Render service status
+        let status_widget = render_service_status(status_panel);
+        f.render_widget(status_widget, status_area);
 
         let help_text = [
             "1-9  view process",
@@ -219,7 +242,7 @@ pub fn draw_status(
 pub fn draw(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     panel: &Panel,
-    _status_panel: &StatusPanel,
+    status_panel: &StatusPanel,
 ) -> io::Result<()> {
     terminal.draw(|f| {
         let area = f.size();
@@ -231,7 +254,16 @@ pub fn draw(
             .split(area);
 
         let content_area = chunks[0];
-        let help_area = chunks[1];
+        let sidebar_area = chunks[1];
+
+        // Split sidebar into status and help sections
+        let sidebar_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(0)].as_ref())
+            .split(sidebar_area);
+
+        let status_area = sidebar_chunks[0];
+        let help_area = sidebar_chunks[1];
 
         let height = content_area.height.saturating_sub(2) as usize;
 
@@ -291,6 +323,10 @@ pub fn draw(
             };
             f.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
         }
+
+        // Render service status
+        let status_widget = render_service_status(status_panel);
+        f.render_widget(status_widget, status_area);
 
         let help_text = [
             "1-9  view process",
