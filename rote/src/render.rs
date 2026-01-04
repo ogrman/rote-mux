@@ -100,7 +100,7 @@ pub fn draw_status(
             Cell::from("#"),
             Cell::from("Service").style(header_style),
             Cell::from("Status").style(header_style),
-            Cell::from("Exit Code").style(header_style),
+            Cell::from("Previous exit code").style(header_style),
             Cell::from("Dependencies").style(header_style),
         ])
         .style(Style::default().bg(Color::Reset));
@@ -129,22 +129,12 @@ pub fn draw_status(
                     (_, ProcessStatus::Exited) => ("✓ Exited", Color::Gray),
                 };
 
-                let (exit_code_text, exit_code_color) = match entry.status {
-                    ProcessStatus::NotStarted | ProcessStatus::Running => {
-                        (String::from("-"), Color::Reset)
+                let (exit_code_text, exit_code_color) = match entry.exit_code {
+                    Some(code) => {
+                        let color = if code == 0 { Color::Reset } else { Color::Red };
+                        (code.to_string(), color)
                     }
-                    ProcessStatus::Exited => {
-                        let text = entry
-                            .exit_code
-                            .map(|c| c.to_string())
-                            .unwrap_or_else(|| String::from("unknown"));
-                        let color = match entry.exit_code {
-                            Some(0) => Color::Reset,
-                            Some(_) => Color::Red,
-                            None => Color::Reset,
-                        };
-                        (text, color)
-                    }
+                    None => (String::from("-"), Color::Reset),
                 };
 
                 let dependencies_cell = if entry.dependencies.is_empty() {

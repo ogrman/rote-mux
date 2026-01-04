@@ -328,16 +328,11 @@ pub async fn run_with_input(
                     }
 
                     // Auto-restart if configured (only for Start services, not Run services)
+                    // Skip if a process is already running (e.g., manual restart already happened)
                     if service_config.autorestart
                         && matches!(service_config.action, Some(ServiceAction::Start { .. }))
+                        && procs[*panel].is_none()
                     {
-                        // Wait for the old process to fully clean up
-                        if let Some(proc) = procs[*panel].take() {
-                            let _ = proc.wait_task.await;
-                            let _ = proc.stdout_task.await;
-                            let _ = proc.stderr_task.await;
-                        }
-
                         let p = &mut panels[*panel];
                         let was_following = p.follow;
                         let timestamp = format_timestamp(p.timestamps);
@@ -351,8 +346,6 @@ pub async fn run_with_input(
                             p.scroll = max_len - 1;
                         }
                         p.follow = was_following;
-
-                        status_panel.update_exit_code(service_name.clone(), None);
 
                         let cwd = panels[*panel].cwd.as_deref();
                         match ServiceInstance::spawn(
@@ -519,7 +512,6 @@ pub async fn run_with_input(
                     let _ = proc.stderr_task.await;
                 }
 
-                status_panel.update_exit_code(panels[*active].service_name.clone(), None);
                 let was_following = panels[*active].follow;
                 let timestamp = format_timestamp(panels[*active].timestamps);
                 let status_msg = if was_not_started {

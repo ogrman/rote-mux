@@ -11,7 +11,6 @@ services:
     require: [setup-task]
   auto-restarting:
     start: bash -c 'echo "Starting auto-restarting service"; sleep 3; echo "Service exiting after 3 seconds"'
-    require: [setup-task]
     autorestart: true
   setup-task:
     run: true

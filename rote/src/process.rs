@@ -79,7 +79,19 @@ impl ServiceInstance {
         panel: PanelIndex,
         result: &std::io::Result<std::process::ExitStatus>,
     ) {
-        let exit_code = result.as_ref().ok().and_then(|s| s.code());
+        use std::os::unix::process::ExitStatusExt;
+
+        let exit_code = result.as_ref().ok().and_then(|s| {
+            // First try to get the exit code directly
+            if let Some(code) = s.code() {
+                Some(code)
+            } else if let Some(signal) = s.signal() {
+                // Process was killed by signal - use standard 128+signal convention
+                Some(128 + signal)
+            } else {
+                None
+            }
+        });
         let is_ok = result.is_ok();
         let status = result.as_ref().ok().copied();
 
