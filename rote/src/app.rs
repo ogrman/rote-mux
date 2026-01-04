@@ -156,11 +156,11 @@ pub async fn run_with_input(
     for service_name in &service_names {
         let service_config = config.services.get(service_name).unwrap();
         if let Some(action) = &service_config.action {
-            // Services in services_list are being started, others show as "Pending"
+            // Services in services_list are being started, others show as "Not started"
             let initial_status = if services_list.contains(service_name) {
                 ProcessStatus::Running
             } else {
-                ProcessStatus::Exited // Will show as not started
+                ProcessStatus::NotStarted
             };
             status_panel.update_entry_with_action(
                 service_name.clone(),
@@ -316,14 +316,65 @@ pub async fn run_with_input(
                 status_panel.update_exit_code(p.service_name.clone(), exit_code);
 
                 // If this was a Run service, mark it as completed and try to start more services
-                let service_name = &panels[*panel].service_name;
-                if let Some(service_config) = config.services.get(service_name) {
+                let service_name = panels[*panel].service_name.clone();
+                if let Some(service_config) = config.services.get(&service_name) {
                     if matches!(service_config.action, Some(ServiceAction::Run { .. })) {
                         // Only mark as completed if it succeeded
                         if exit_code == Some(0) {
-                            service_manager.mark_run_completed(service_name);
+                            service_manager.mark_run_completed(&service_name);
                             // Try to start more services
                             let _ = tx.send(UiEvent::StartNextService).await;
+                        }
+                    }
+
+                    // Auto-restart if configured (only for Start services, not Run services)
+                    if service_config.autorestart
+                        && matches!(service_config.action, Some(ServiceAction::Start { .. }))
+                    {
+                        // Wait for the old process to fully clean up
+                        if let Some(proc) = procs[*panel].take() {
+                            let _ = proc.wait_task.await;
+                            let _ = proc.stdout_task.await;
+                            let _ = proc.stderr_task.await;
+                        }
+
+                        let p = &mut panels[*panel];
+                        let was_following = p.follow;
+                        let timestamp = format_timestamp(p.timestamps);
+                        p.messages.push(
+                            MessageKind::Status,
+                            "[auto-restarting]",
+                            timestamp.as_deref(),
+                        );
+                        let max_len = p.visible_len();
+                        if max_len > 0 && was_following {
+                            p.scroll = max_len - 1;
+                        }
+                        p.follow = was_following;
+
+                        status_panel.update_exit_code(service_name.clone(), None);
+
+                        let cwd = panels[*panel].cwd.as_deref();
+                        match ServiceInstance::spawn(
+                            panel,
+                            &panels[*panel].cmd,
+                            cwd,
+                            tx.clone(),
+                            shutdown_tx.subscribe(),
+                        ) {
+                            Ok(proc) => {
+                                procs[*panel] = Some(proc);
+                                status_panel
+                                    .update_entry(service_name.clone(), ProcessStatus::Running);
+                            }
+                            Err(e) => {
+                                let timestamp = format_timestamp(panels[*panel].timestamps);
+                                panels[*panel].messages.push(
+                                    MessageKind::Status,
+                                    &format!("[auto-restart failed: {e}]"),
+                                    timestamp.as_deref(),
+                                );
+                            }
                         }
                     }
                 }
@@ -402,7 +453,17 @@ pub async fn run_with_input(
             UiEvent::CheckStatus => {
                 let mut prev_statuses = prev_statuses_storage.take().unwrap_or_default();
                 if prev_statuses.is_empty() && !procs.is_empty() {
-                    prev_statuses = vec![ProcessStatus::Running; procs.len()];
+                    // Initialize with correct status based on whether service is in services_list
+                    prev_statuses = panels
+                        .iter()
+                        .map(|p| {
+                            if services_list.contains(&p.service_name) {
+                                ProcessStatus::Running
+                            } else {
+                                ProcessStatus::NotStarted
+                            }
+                        })
+                        .collect();
                 }
 
                 let mut any_change = false;
@@ -415,7 +476,11 @@ pub async fn run_with_input(
                             ProcessStatus::Running
                         }
                     } else {
-                        ProcessStatus::Exited
+                        // Preserve NotStarted status for services that were never started
+                        match prev_statuses.get(i) {
+                            Some(ProcessStatus::NotStarted) => ProcessStatus::NotStarted,
+                            _ => ProcessStatus::Exited,
+                        }
                     };
 
                     if prev_statuses.get(i) != Some(&current_status) {
@@ -438,6 +503,14 @@ pub async fn run_with_input(
             }
 
             UiEvent::Restart => {
+                // Check if service was NotStarted before we potentially terminate it
+                let was_not_started = status_panel
+                    .entries
+                    .iter()
+                    .find(|e| e.service_name == panels[*active].service_name)
+                    .map(|e| e.status == ProcessStatus::NotStarted)
+                    .unwrap_or(false);
+
                 if let Some(proc) = procs[*active].take() {
                     proc.terminate().await;
                     // Wait for the process to fully exit and all I/O to drain
@@ -449,9 +522,14 @@ pub async fn run_with_input(
                 status_panel.update_exit_code(panels[*active].service_name.clone(), None);
                 let was_following = panels[*active].follow;
                 let timestamp = format_timestamp(panels[*active].timestamps);
+                let status_msg = if was_not_started {
+                    "[starting]"
+                } else {
+                    "[restarting]"
+                };
                 panels[*active].messages.push(
                     MessageKind::Status,
-                    "[restarting]",
+                    status_msg,
                     timestamp.as_deref(),
                 );
                 let max_len = panels[*active].visible_len();
@@ -696,6 +774,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec![],
+                autorestart: false,
             },
         );
 
@@ -719,6 +798,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["dep1".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -728,6 +808,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec![],
+                autorestart: false,
             },
         );
 
@@ -751,6 +832,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["dep1".to_string(), "dep2".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -760,6 +842,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec![],
+                autorestart: false,
             },
         );
         services.insert(
@@ -769,6 +852,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec![],
+                autorestart: false,
             },
         );
 
@@ -795,6 +879,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["dep1".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -804,6 +889,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["dep2".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -813,6 +899,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec![],
+                autorestart: false,
             },
         );
 
@@ -836,6 +923,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["service2".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -845,6 +933,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["service1".to_string()],
+                autorestart: false,
             },
         );
 
@@ -892,6 +981,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["nonexistent".to_string()],
+                autorestart: false,
             },
         );
 
@@ -915,6 +1005,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["dep1".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -924,6 +1015,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["dep1".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -933,6 +1025,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec![],
+                autorestart: false,
             },
         );
 
@@ -961,6 +1054,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["dep1".to_string(), "dep2".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -970,6 +1064,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["base".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -979,6 +1074,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec!["base".to_string()],
+                autorestart: false,
             },
         );
         services.insert(
@@ -988,6 +1084,7 @@ mod tests {
                 cwd: None,
                 display: None,
                 require: vec![],
+                autorestart: false,
             },
         );
 

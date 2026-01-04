@@ -26,6 +26,7 @@ pub fn draw_shutdown(
 
         for entry in &status_panel.entries {
             let status_str = match (&entry.action_type, entry.status) {
+                (_, ProcessStatus::NotStarted) => "○",
                 (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
                     if entry.exit_code == Some(0) {
                         "✓"
@@ -110,6 +111,7 @@ pub fn draw_status(
             .enumerate()
             .map(|(i, entry)| {
                 let (status_text, status_color) = match (&entry.action_type, entry.status) {
+                    (_, ProcessStatus::NotStarted) => ("○ Not started", Color::Gray),
                     (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
                         if entry.exit_code == Some(0) {
                             ("✓ Completed", Color::Green)
@@ -127,12 +129,22 @@ pub fn draw_status(
                     (_, ProcessStatus::Exited) => ("✓ Exited", Color::Gray),
                 };
 
-                let exit_code_text = match entry.status {
-                    ProcessStatus::Running => String::from("-"),
-                    ProcessStatus::Exited => entry
-                        .exit_code
-                        .map(|c| c.to_string())
-                        .unwrap_or_else(|| String::from("unknown")),
+                let (exit_code_text, exit_code_color) = match entry.status {
+                    ProcessStatus::NotStarted | ProcessStatus::Running => {
+                        (String::from("-"), Color::Reset)
+                    }
+                    ProcessStatus::Exited => {
+                        let text = entry
+                            .exit_code
+                            .map(|c| c.to_string())
+                            .unwrap_or_else(|| String::from("unknown"));
+                        let color = match entry.exit_code {
+                            Some(0) => Color::Reset,
+                            Some(_) => Color::Red,
+                            None => Color::Reset,
+                        };
+                        (text, color)
+                    }
                 };
 
                 let dependencies_cell = if entry.dependencies.is_empty() {
@@ -147,6 +159,7 @@ pub fn draw_status(
                             status_panel.entries.iter().find(|e| e.service_name == *dep);
                         let is_down_or_failed = match dep_status {
                             Some(dep_entry) => match (&dep_entry.action_type, dep_entry.status) {
+                                (_, ProcessStatus::NotStarted) => false,
                                 (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
                                     dep_entry.exit_code != Some(0)
                                 }
@@ -172,7 +185,7 @@ pub fn draw_status(
                     Cell::from((i + 1).to_string()),
                     Cell::from(entry.service_name.clone()),
                     Cell::from(status_text).style(Style::default().fg(status_color)),
-                    Cell::from(exit_code_text),
+                    Cell::from(exit_code_text).style(Style::default().fg(exit_code_color)),
                     dependencies_cell,
                 ])
             })

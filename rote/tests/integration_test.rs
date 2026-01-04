@@ -112,6 +112,7 @@ async fn test_run_dependency_blocks_until_complete() {
             cwd: None,
             display: None,
             require: vec![],
+            autorestart: false,
         },
     );
 
@@ -125,6 +126,7 @@ async fn test_run_dependency_blocks_until_complete() {
             cwd: None,
             display: None,
             require: vec!["setup".to_string()],
+            autorestart: false,
         },
     );
 

@@ -3,6 +3,7 @@ use std::process::ExitStatus;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ProcessStatus {
+    NotStarted,
     Running,
     Exited,
 }

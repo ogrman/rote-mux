@@ -28,6 +28,9 @@ pub struct ServiceConfiguration {
     /// A list of other services that must be started before this service.
     #[serde(default)]
     pub require: Vec<String>,
+    /// Whether to automatically restart the service when it exits.
+    #[serde(default)]
+    pub autorestart: bool,
 }
 
 /// Represents the action to be performed for a service.
@@ -134,7 +137,8 @@ mod tests {
             vec![
                 "google-ping".to_string(),
                 "cloudflare-ping".to_string(),
-                "short-lived".to_string()
+                "short-lived".to_string(),
+                "auto-restarting".to_string()
             ]
         );
         assert!(map["ping-demo"].action.is_none());

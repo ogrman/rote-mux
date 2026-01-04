@@ -146,6 +146,7 @@ mod tests {
                     cwd: None,
                     display: None,
                     require: require.into_iter().map(String::from).collect(),
+                    autorestart: false,
                 },
             );
         }

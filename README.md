@@ -65,6 +65,7 @@ Each service can have the following properties:
 - `cwd` (optional): Working directory for the command (relative to the config file)
 - `display` (optional): List of streams to display (["stdout"], ["stderr"], or both by default)
 - `require` (optional): List of services that must be started before this one
+- `autorestart` (optional): If true, automatically restart the service when it exits (default: false)
 
 ### Actions: `start` vs `run`
 
