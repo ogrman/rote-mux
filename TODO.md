@@ -100,3 +100,19 @@ TODO Format:
       start via StartNextService events in the main event loop. Run services
       track completion in completed_run_services set, and dependent services
       start once their Run dependencies complete. Status screen shown immediately.
+
+[   ] Wait for the process to exit before starting it again when restarting
+
+[   ] The program does not exit correctly when pressing 'q'. The program exits
+      alternative screen, but does not actually quit. This is true, at least,
+      when running through `cargo run -- -c example.yaml`. This needs to be
+      fixed. I would prefer if we, when the user presses 'q', we exited the
+      alternative screen immediately and showed shutdown progress instead of
+      having the program freeze. None of the keybindings should be active
+      during the shutdown process.
+
+[   ] Make the left and right arrows scroll through the panels (with status
+      being before the first process panel)
+
+[   ] Sort the process list and panels by the service name so that ordering
+      is always consistent.
