@@ -4,7 +4,10 @@ use ratatui::{
     prelude::CrosstermBackend,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Cell, Paragraph, Row, Table},
+    widgets::{
+        Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Table,
+    },
 };
 use std::io;
 
@@ -271,6 +274,23 @@ pub fn draw(
             Paragraph::new(text).block(Block::default().title(title).borders(Borders::ALL));
 
         f.render_widget(widget, content_area);
+
+        // Render scrollbar if there are more lines than can fit on screen
+        if total_lines > height {
+            let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None);
+            let mut scrollbar_state =
+                ScrollbarState::new(total_lines.saturating_sub(height)).position(start);
+            // Render inside the border (inset by 1 on top and bottom)
+            let scrollbar_area = ratatui::layout::Rect {
+                x: content_area.x + content_area.width.saturating_sub(1),
+                y: content_area.y + 1,
+                width: 1,
+                height: content_area.height.saturating_sub(2),
+            };
+            f.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
+        }
 
         let help_text = [
             "1-9  view process",
