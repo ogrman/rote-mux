@@ -11,7 +11,6 @@ const UI_EVENT_CHANNEL_SIZE: usize = 1024;
 const SHUTDOWN_CHANNEL_SIZE: usize = 16;
 const STATUS_CHECK_INTERVAL_MS: u64 = 250;
 const KEYBOARD_POLL_INTERVAL_MS: u64 = 250;
-const SHUTDOWN_CHECK_INTERVAL_MS: u64 = 100;
 
 use crate::{
     config::{Config, ServiceAction},
@@ -36,39 +35,6 @@ fn format_timestamp(timestamps: bool) -> Option<String> {
         Some(format!("{hours:02}:{minutes:02}:{seconds:02}"))
     } else {
         None
-    }
-}
-
-async fn wait_for_shutdown(
-    procs: &mut [Option<ServiceInstance>],
-    panels: &[Panel],
-    status_panel: &mut StatusPanel,
-    enable_terminal: bool,
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-) -> io::Result<bool> {
-    loop {
-        // Check process status
-        let mut all_exited = true;
-        for (i, proc) in procs.iter_mut().enumerate() {
-            if let Some(p) = proc {
-                if p.pid.is_none() || is_process_exited_by_pid(p.pid) {
-                    // Process has exited
-                    status_panel
-                        .update_entry(panels[i].service_name.clone(), ProcessStatus::Exited);
-                    if enable_terminal {
-                        render::draw_shutdown(terminal, status_panel)?;
-                    }
-                } else {
-                    all_exited = false;
-                }
-            }
-        }
-
-        if all_exited {
-            return Ok(true);
-        }
-
-        tokio::time::sleep(Duration::from_millis(SHUTDOWN_CHECK_INTERVAL_MS)).await;
     }
 }
 
@@ -117,10 +83,26 @@ pub async fn run_with_input(
     let services_list = resolve_dependencies(&config, &target_services)?;
 
     // Create panels for ALL services with actions (not just those being started)
+    // Sort by service name for consistent ordering
     let mut panels = Vec::new();
     let mut service_to_panel: HashMap<String, PanelIndex> = HashMap::new();
 
-    for (service_name, service_config) in &config.services {
+    // Collect and sort service names for deterministic panel order
+    let mut service_names: Vec<_> = config
+        .services
+        .iter()
+        .filter(|(_, cfg)| {
+            matches!(
+                cfg.action,
+                Some(ServiceAction::Start { .. }) | Some(ServiceAction::Run { .. })
+            )
+        })
+        .map(|(name, _)| name.clone())
+        .collect();
+    service_names.sort();
+
+    for service_name in &service_names {
+        let service_config = config.services.get(service_name).unwrap();
         // Create panels for services with "start" or "run" actions
         if let Some(ServiceAction::Start { command }) | Some(ServiceAction::Run { command }) =
             &service_config.action
@@ -169,9 +151,10 @@ pub async fn run_with_input(
         return Ok(());
     }
 
-    // Initialize status panel with all services that have actions
+    // Initialize status panel with all services that have actions (sorted order)
     let mut status_panel = StatusPanel::new();
-    for (service_name, service_config) in &config.services {
+    for service_name in &service_names {
+        let service_config = config.services.get(service_name).unwrap();
         if let Some(action) = &service_config.action {
             // Services in services_list are being started, others show as "Pending"
             let initial_status = if services_list.contains(service_name) {
@@ -216,10 +199,16 @@ pub async fn run_with_input(
     });
 
     // keyboard - spawn if we created internal_tx (i.e., no external input)
+    let keyboard_shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let keyboard_task = if external_rx.is_none() {
         let tx_kb = tx.clone();
+        let shutdown_flag = keyboard_shutdown.clone();
         Some(tokio::spawn(async move {
             loop {
+                // Check shutdown flag before polling
+                if shutdown_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
                 let poll_result = event::poll(Duration::from_millis(KEYBOARD_POLL_INTERVAL_MS));
                 match poll_result {
                     Ok(true) => {
@@ -237,6 +226,8 @@ pub async fn run_with_input(
                                 KeyCode::Down => UiEvent::Scroll(1),
                                 KeyCode::PageUp => UiEvent::Scroll(-20),
                                 KeyCode::PageDown => UiEvent::Scroll(20),
+                                KeyCode::Left => UiEvent::PrevPanel,
+                                KeyCode::Right => UiEvent::NextPanel,
                                 _ => continue,
                             };
                             // Ignore send errors - if channel is closed, we're shutting down
@@ -374,6 +365,40 @@ pub async fn run_with_input(
                 redraw = true;
             }
 
+            UiEvent::PrevPanel => {
+                if showing_status {
+                    // Wrap from status to last panel
+                    if !panels.is_empty() {
+                        active = PanelIndex::new(panels.len() - 1);
+                        showing_status = false;
+                    }
+                } else if *active == 0 {
+                    // Go from first panel to status
+                    showing_status = true;
+                } else {
+                    // Go to previous panel
+                    active = PanelIndex::new(*active - 1);
+                }
+                redraw = true;
+            }
+
+            UiEvent::NextPanel => {
+                if showing_status {
+                    // Go from status to first panel
+                    if !panels.is_empty() {
+                        active = PanelIndex::new(0);
+                        showing_status = false;
+                    }
+                } else if *active >= panels.len() - 1 {
+                    // Go from last panel to status
+                    showing_status = true;
+                } else {
+                    // Go to next panel
+                    active = PanelIndex::new(*active + 1);
+                }
+                redraw = true;
+            }
+
             UiEvent::CheckStatus => {
                 let mut prev_statuses = prev_statuses_storage.take().unwrap_or_default();
                 if prev_statuses.is_empty() && !procs.is_empty() {
@@ -415,7 +440,10 @@ pub async fn run_with_input(
             UiEvent::Restart => {
                 if let Some(proc) = procs[*active].take() {
                     proc.terminate().await;
+                    // Wait for the process to fully exit and all I/O to drain
                     let _ = proc.wait_task.await;
+                    let _ = proc.stdout_task.await;
+                    let _ = proc.stderr_task.await;
                 }
 
                 status_panel.update_exit_code(panels[*active].service_name.clone(), None);
@@ -456,46 +484,52 @@ pub async fn run_with_input(
             }
 
             UiEvent::Exit => {
+                // Signal keyboard task to stop and abort status check task
+                keyboard_shutdown.store(true, std::sync::atomic::Ordering::Relaxed);
+                status_check_task.abort();
+
+                // Exit alternate screen immediately so user sees shutdown progress
+                if enable_terminal {
+                    let _ = execute!(io::stdout(), LeaveAlternateScreen);
+                    let _ = disable_raw_mode();
+                    println!("Shutting down...");
+                }
+
                 // Ignore send errors - if all receivers are gone, shutdown proceeds anyway
                 let _ = shutdown_tx.send(());
 
-                // Initialize status panel with all running services
-                for (i, panel) in panels.iter().enumerate() {
-                    if procs[i].is_some() {
-                        status_panel
-                            .update_entry(panel.service_name.clone(), ProcessStatus::Running);
+                // Terminate all processes
+                for (i, proc) in procs.iter_mut().enumerate() {
+                    if let Some(p) = proc {
+                        if enable_terminal {
+                            println!("  Stopping {}...", panels[i].service_name);
+                        }
+                        p.terminate().await;
                     }
                 }
 
-                // Terminate all processes
-                for proc in procs.iter_mut().flatten() {
-                    proc.terminate().await;
+                // Wait for all processes to fully exit
+                for (i, proc) in procs.iter_mut().enumerate() {
+                    if let Some(p) = proc.take() {
+                        let _ = p.wait_task.await;
+                        let _ = p.stdout_task.await;
+                        let _ = p.stderr_task.await;
+                        if enable_terminal {
+                            println!("  {} stopped", panels[i].service_name);
+                        }
+                    }
                 }
 
-                // Switch to showing shutdown progress
-                if enable_terminal {
-                    render::draw_shutdown(&mut terminal, &status_panel)?;
-                }
-
-                // Wait for all processes to exit
-                let shutdown_complete = wait_for_shutdown(
-                    &mut procs,
-                    &panels,
-                    &mut status_panel,
-                    enable_terminal,
-                    &mut terminal,
-                )
-                .await?;
-
+                // Abort keyboard task if it's still running
                 if let Some(ref task) = keyboard_task {
                     task.abort();
                 }
 
-                status_check_task.abort();
-
-                if shutdown_complete {
-                    break;
+                if enable_terminal {
+                    println!("Goodbye!");
                 }
+
+                break;
             }
 
             UiEvent::StartNextService => {

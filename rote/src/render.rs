@@ -194,10 +194,8 @@ pub fn draw_status(
         f.render_widget(table, main_area);
 
         let help_text = [
-            String::from("Press a number (1-9) to view a process"),
-            String::from("Press 's' to move to service overview"),
-            String::from("Press 'r' to restart current process"),
-            String::from("Press 'q' to quit"),
+            String::from("1-9: view process | Left/Right: navigate panels"),
+            String::from("s: service overview | r: restart | q: quit"),
         ]
         .join("\n");
 
@@ -258,10 +256,8 @@ pub fn draw(
         f.render_widget(widget, content_area);
 
         let help_text = [
-            String::from("Press a number (1-9) to view a process"),
-            String::from("Press 's' to move to service overview"),
-            String::from("Press 'r' to restart current process"),
-            String::from("Press 'q' to quit"),
+            String::from("1-9: view process | Left/Right: navigate panels"),
+            String::from("s: service overview | r: restart | q: quit"),
         ]
         .join("\n");
 

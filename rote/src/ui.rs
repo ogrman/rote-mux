@@ -31,6 +31,10 @@ pub enum UiEvent {
     ToggleStderr,
     Restart,
     Exit,
+    /// Navigate to the previous panel (or status if at first panel)
+    PrevPanel,
+    /// Navigate to the next panel (or first panel if at status)
+    NextPanel,
     /// Trigger starting the next pending service
     StartNextService,
 }
