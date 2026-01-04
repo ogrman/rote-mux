@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, path::PathBuf, time::Duration};
+use std::{collections::HashMap, io, io::Write, path::PathBuf, time::Duration};
 
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -584,30 +584,53 @@ pub async fn run_with_input(
                 if enable_terminal {
                     let _ = execute!(io::stdout(), LeaveAlternateScreen);
                     let _ = disable_raw_mode();
-                    println!("Shutting down...");
                 }
 
                 // Ignore send errors - if all receivers are gone, shutdown proceeds anyway
                 let _ = shutdown_tx.send(());
 
-                // Terminate all processes
-                for (i, proc) in procs.iter_mut().enumerate() {
-                    if let Some(p) = proc {
-                        if enable_terminal {
-                            println!("  Stopping {}...", panels[i].service_name);
+                // Collect running services
+                let mut running_services: Vec<String> = procs
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, p)| {
+                        if p.is_some() {
+                            Some(panels[i].service_name.clone())
+                        } else {
+                            None
                         }
-                        p.terminate().await;
+                    })
+                    .collect();
+
+                // Helper to print current status
+                let print_status = |services: &[String]| {
+                    if services.is_empty() {
+                        print!("\rWaiting for services to shut down: (none)                    ");
+                    } else {
+                        print!(
+                            "\rWaiting for services to shut down: [{}]",
+                            services.join(", ")
+                        );
                     }
+                    let _ = io::stdout().flush();
+                };
+
+                if enable_terminal && !running_services.is_empty() {
+                    print_status(&running_services);
                 }
 
-                // Wait for all processes to fully exit
+                // Terminate and wait for each process synchronously
                 for (i, proc) in procs.iter_mut().enumerate() {
                     if let Some(p) = proc.take() {
+                        p.terminate().await;
                         let _ = p.wait_task.await;
                         let _ = p.stdout_task.await;
                         let _ = p.stderr_task.await;
+
+                        // Remove from running list and update display
                         if enable_terminal {
-                            println!("  {} stopped", panels[i].service_name);
+                            running_services.retain(|s| s != &panels[i].service_name);
+                            print_status(&running_services);
                         }
                     }
                 }
@@ -618,7 +641,7 @@ pub async fn run_with_input(
                 }
 
                 if enable_terminal {
-                    println!("Goodbye!");
+                    println!();
                 }
 
                 break;
