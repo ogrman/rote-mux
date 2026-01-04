@@ -303,15 +303,26 @@ pub async fn run_with_input(
                 status,
                 exit_code,
             } => {
+                let p = &mut panels[*panel];
+                let was_following = p.follow;
+
                 let msg = format!(
                     "[exited: {}]",
                     status.map(|s| s.to_string()).unwrap_or("unknown".into())
                 );
-                let timestamp = format_timestamp(panels[*panel].timestamps);
-                panels[*panel]
-                    .messages
+                let timestamp = format_timestamp(p.timestamps);
+                p.messages
                     .push(MessageKind::Status, &msg, timestamp.as_deref());
-                status_panel.update_exit_code(panels[*panel].service_name.clone(), exit_code);
+
+                // Update scroll to show the exit message if following
+                if was_following {
+                    let max_len = p.visible_len();
+                    if max_len > 0 {
+                        p.scroll = max_len - 1;
+                    }
+                }
+
+                status_panel.update_exit_code(p.service_name.clone(), exit_code);
 
                 // If this was a Run service, mark it as completed and try to start more services
                 let service_name = &panels[*panel].service_name;
