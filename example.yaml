@@ -10,7 +10,7 @@ services:
     start: bash -c 'echo "Starting short-lived service"; sleep 5; echo "Service exiting after 5 seconds"; exit 1'
     require: [setup-task]
   auto-restarting:
-    start: bash -c 'echo "Starting auto-restarting service"; sleep 3; echo "Service exiting after 3 seconds"'
+    start: bash -c 'echo "Starting auto-restarting service"; echo "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco."; sleep 3; echo "Service exiting after 3 seconds"'
     autorestart: true
   setup-task:
     run: true
