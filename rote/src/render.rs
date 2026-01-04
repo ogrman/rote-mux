@@ -237,11 +237,23 @@ pub fn draw(
                 .messages
                 .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
 
-        let start = panel
-            .scroll
-            .saturating_sub(height.saturating_sub(1))
-            .min(filtered_lines.len());
-        let end = (panel.scroll + 1).min(filtered_lines.len());
+        let total_lines = filtered_lines.len();
+
+        // Calculate start and end positions, ensuring we show as many lines as possible
+        // without scrolling beyond the start of the buffer
+        let (start, end) = if total_lines == 0 {
+            (0, 0)
+        } else if total_lines <= height {
+            // All lines fit on screen, show them all
+            (0, total_lines)
+        } else {
+            // More lines than can fit, compute based on scroll
+            // Clamp scroll to ensure we don't scroll past the start
+            let effective_scroll = panel.scroll.clamp(height - 1, total_lines - 1);
+            let start = effective_scroll - (height - 1);
+            let end = effective_scroll + 1;
+            (start, end)
+        };
         let text = filtered_lines[start..end]
             .iter()
             .map(|(_, line)| format!("{line}\n"))
