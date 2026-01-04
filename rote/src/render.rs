@@ -63,9 +63,9 @@ pub fn draw_status(
         let area = f.size();
 
         let chunks = Layout::default()
-            .direction(Direction::Vertical)
+            .direction(Direction::Horizontal)
             .margin(0)
-            .constraints([Constraint::Min(0), Constraint::Length(6)].as_ref())
+            .constraints([Constraint::Min(0), Constraint::Length(22)].as_ref())
             .split(area);
 
         let main_area = chunks[0];
@@ -194,14 +194,16 @@ pub fn draw_status(
         f.render_widget(table, main_area);
 
         let help_text = [
-            String::from("1-9: view process | Left/Right: navigate panels"),
-            String::from("s: service overview | r: restart | q: quit"),
+            "1-9  view process",
+            "←/→  navigate",
+            "s    status",
+            "q    quit",
         ]
         .join("\n");
 
         let help_widget = Paragraph::new(help_text)
             .alignment(Alignment::Left)
-            .block(Block::default().title("Key Bindings").borders(Borders::ALL));
+            .block(Block::default().title("Keys").borders(Borders::ALL));
 
         f.render_widget(help_widget, help_area);
     })?;
@@ -217,9 +219,9 @@ pub fn draw(
         let area = f.size();
 
         let chunks = Layout::default()
-            .direction(Direction::Vertical)
+            .direction(Direction::Horizontal)
             .margin(0)
-            .constraints([Constraint::Min(0), Constraint::Length(6)].as_ref())
+            .constraints([Constraint::Min(0), Constraint::Length(22)].as_ref())
             .split(area);
 
         let content_area = chunks[0];
@@ -244,7 +246,7 @@ pub fn draw(
             .join("");
 
         let title = format!(
-            "{}  [o:{} e:{}]",
+            "{} [stdout: {}, stderr: {}]",
             panel.title,
             if panel.show_stdout { "on" } else { "off" },
             if panel.show_stderr { "on" } else { "off" },
@@ -256,14 +258,19 @@ pub fn draw(
         f.render_widget(widget, content_area);
 
         let help_text = [
-            String::from("1-9: view process | Left/Right: navigate panels"),
-            String::from("s: service overview | r: restart | q: quit"),
+            "1-9  view process",
+            "←/→  navigate",
+            "s    status",
+            "q    quit",
+            "r    restart",
+            "o    toggle stdout",
+            "e    toggle stderr",
         ]
         .join("\n");
 
         let help_widget = Paragraph::new(help_text)
             .alignment(Alignment::Left)
-            .block(Block::default().title("Key Bindings").borders(Borders::ALL));
+            .block(Block::default().title("Keys").borders(Borders::ALL));
 
         f.render_widget(help_widget, help_area);
     })?;
