@@ -602,13 +602,13 @@ pub async fn run_with_input(
                     })
                     .collect();
 
-                // Helper to print current status
+                // Helper to print current status (uses ANSI escape to clear to end of line)
                 let print_status = |services: &[String]| {
                     if services.is_empty() {
-                        print!("\rWaiting for services to shut down: (none)                    ");
+                        print!("\rWaiting for services to shut down: (none)\x1b[K");
                     } else {
                         print!(
-                            "\rWaiting for services to shut down: [{}]",
+                            "\rWaiting for services to shut down: [{}]\x1b[K",
                             services.join(", ")
                         );
                     }
