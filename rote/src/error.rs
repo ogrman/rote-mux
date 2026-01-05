@@ -7,10 +7,10 @@ pub enum RoteError {
     Io(io::Error),
     /// Configuration error (invalid YAML, missing fields)
     Config(String),
-    /// Service dependency error (circular deps, missing deps)
+    /// Task dependency error (circular deps, missing deps)
     Dependency(String),
     /// Process spawn error
-    Spawn { service: String, source: io::Error },
+    Spawn { task: String, source: io::Error },
 }
 
 impl std::fmt::Display for RoteError {
@@ -19,8 +19,8 @@ impl std::fmt::Display for RoteError {
             RoteError::Io(e) => write!(f, "I/O error: {e}"),
             RoteError::Config(msg) => write!(f, "Configuration error: {msg}"),
             RoteError::Dependency(msg) => write!(f, "Dependency error: {msg}"),
-            RoteError::Spawn { service, source } => {
-                write!(f, "Failed to spawn service '{service}': {source}")
+            RoteError::Spawn { task, source } => {
+                write!(f, "Failed to spawn task '{task}': {source}")
             }
         }
     }
@@ -54,9 +54,9 @@ impl From<RoteError> for io::Error {
             RoteError::Io(e) => e,
             RoteError::Config(msg) => io::Error::new(io::ErrorKind::InvalidData, msg),
             RoteError::Dependency(msg) => io::Error::new(io::ErrorKind::InvalidInput, msg),
-            RoteError::Spawn { service, source } => io::Error::new(
+            RoteError::Spawn { task, source } => io::Error::new(
                 source.kind(),
-                format!("Failed to spawn service '{service}': {source}"),
+                format!("Failed to spawn task '{task}': {source}"),
             ),
         }
     }
@@ -80,10 +80,10 @@ mod tests {
 
     #[test]
     fn test_config_error_display() {
-        let err = RoteError::Config("invalid service name".to_string());
+        let err = RoteError::Config("invalid task name".to_string());
         let display = format!("{err}");
         assert!(display.contains("Configuration error"));
-        assert!(display.contains("invalid service name"));
+        assert!(display.contains("invalid task name"));
     }
 
     #[test]
@@ -97,7 +97,7 @@ mod tests {
     #[test]
     fn test_spawn_error_display() {
         let err = RoteError::Spawn {
-            service: "web-server".to_string(),
+            task: "web-server".to_string(),
             source: io::Error::new(io::ErrorKind::NotFound, "command not found"),
         };
         let display = format!("{err}");

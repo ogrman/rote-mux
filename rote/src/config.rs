@@ -3,21 +3,21 @@ use std::{borrow::Cow, collections::HashMap};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    /// The default service to run when none is specified.
+    /// The default task to run when none is specified.
     pub default: Option<String>,
-    /// A mapping of service names to their configurations.
-    pub services: HashMap<String, ServiceConfiguration>,
+    /// A mapping of task names to their configurations.
+    pub tasks: HashMap<String, TaskConfiguration>,
     /// Whether to show timestamps for log messages.
     #[serde(default)]
     pub timestamps: bool,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ServiceConfiguration {
-    /// The action to be performed for the service (either `run` or `start`).
+pub struct TaskConfiguration {
+    /// The action to be performed for the task (either `run` or `start`).
     #[serde(default, flatten)]
-    pub action: Option<ServiceAction>,
-    /// The working directory for the service command, relative to the
+    pub action: Option<TaskAction>,
+    /// The working directory for the task command, relative to the
     /// directory containing the YAML file.
     #[serde(default)]
     pub cwd: Option<String>,
@@ -25,23 +25,23 @@ pub struct ServiceConfiguration {
     /// are displayed. An empty list means no output is displayed.
     #[serde(default)]
     pub display: Option<Vec<String>>,
-    /// A list of other services that must be started before this service.
+    /// A list of other tasks that must be started before this task.
     #[serde(default)]
     pub require: Vec<String>,
-    /// Whether to automatically restart the service when it exits.
+    /// Whether to automatically restart the task when it exits.
     #[serde(default)]
     pub autorestart: bool,
 }
 
-/// Represents the action to be performed for a service.
+/// Represents the action to be performed for a task.
 ///
 /// This can either be a `run` action or a `start` action, each containing
 /// a command to be executed. `run` is used for something that should run
-/// to completion before the service is considered ready, while `start` is used
-/// for long-running services. These are mutually exclusive.
+/// to completion before the task is considered ready, while `start` is used
+/// for long-running tasks. These are mutually exclusive.
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(untagged)]
-pub enum ServiceAction {
+pub enum TaskAction {
     Run {
         #[serde(rename = "run")]
         command: CommandValue,
@@ -88,10 +88,10 @@ mod tests {
             let yaml_run = r#"
                 run: echo 'Hello, World!'
                 "#;
-            let action: ServiceAction = serde_yaml::from_str(yaml_run).unwrap();
+            let action: TaskAction = serde_yaml::from_str(yaml_run).unwrap();
             assert_eq!(
                 action,
-                ServiceAction::Run {
+                TaskAction::Run {
                     command: CommandValue::String(Cow::Borrowed("echo 'Hello, World!'")),
                 },
             );
@@ -99,13 +99,13 @@ mod tests {
 
         {
             let yaml_start = r#"
-                start: ./start_service.sh
+                start: ./start_task.sh
                 "#;
-            let action: ServiceAction = serde_yaml::from_str(yaml_start).unwrap();
+            let action: TaskAction = serde_yaml::from_str(yaml_start).unwrap();
             assert_eq!(
                 action,
-                ServiceAction::Start {
-                    command: CommandValue::String(Cow::Borrowed("./start_service.sh")),
+                TaskAction::Start {
+                    command: CommandValue::String(Cow::Borrowed("./start_task.sh")),
                 }
             );
         }
@@ -115,10 +115,10 @@ mod tests {
     fn test_deserialize_example_yaml() {
         let config = load_config();
         assert_eq!(config.default.as_deref(), Some("ping-demo"));
-        let map = &config.services;
+        let map = &config.tasks;
         assert_eq!(
             map["google-ping"].action,
-            Some(ServiceAction::Start {
+            Some(TaskAction::Start {
                 command: CommandValue::String(Cow::Borrowed("ping google.com")),
             })
         );
@@ -126,7 +126,7 @@ mod tests {
 
         assert_eq!(
             map["cloudflare-ping"].action,
-            Some(ServiceAction::Start {
+            Some(TaskAction::Start {
                 command: CommandValue::String(Cow::Borrowed("ping 1.1.1.1")),
             }),
         );
@@ -143,10 +143,10 @@ mod tests {
         );
         assert!(map["ping-demo"].action.is_none());
 
-        // Check setup-task service
+        // Check setup-task task
         assert_eq!(
             map["setup-task"].action,
-            Some(ServiceAction::Run {
+            Some(TaskAction::Run {
                 command: CommandValue::Bool(true),
             })
         );
@@ -155,28 +155,28 @@ mod tests {
     #[test]
     fn test_missing_optional_fields() {
         let yaml = r#"
-    default: service
-    services:
-      service:
+    default: task
+    tasks:
+      task:
         run: echo 'hi'
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let service = &config.services["service"];
+        let task = &config.tasks["task"];
         assert_eq!(
-            service.action,
-            Some(ServiceAction::Run {
+            task.action,
+            Some(TaskAction::Run {
                 command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
-        assert_eq!(service.cwd, None);
-        assert_eq!(service.display, None);
-        assert_eq!(service.require, Vec::<String>::new());
+        assert_eq!(task.cwd, None);
+        assert_eq!(task.display, None);
+        assert_eq!(task.require, Vec::<String>::new());
     }
 
     #[test]
     fn test_default_field_optional() {
         let yaml = r#"
-            services: {}
+            tasks: {}
             "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.default, None);
@@ -192,17 +192,17 @@ mod tests {
     #[test]
     fn test_extra_fields_are_ignored() {
         let yaml = r#"
-            default: service
-            services:
-                service:
+            default: task
+            tasks:
+                task:
                     run: echo 'hi'
                     extra: value
             "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let service = &config.services["service"];
+        let task = &config.tasks["task"];
         assert_eq!(
-            service.action,
-            Some(ServiceAction::Run {
+            task.action,
+            Some(TaskAction::Run {
                 command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
@@ -211,42 +211,42 @@ mod tests {
     #[test]
     fn test_display_and_require_empty() {
         let yaml = r#"
-    default: service
-    services:
-      service:
+    default: task
+    tasks:
+      task:
         run: echo 'hi'
         display: []
         require: []
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let service = &config.services["service"];
+        let task = &config.tasks["task"];
         assert_eq!(
-            service.action,
-            Some(ServiceAction::Run {
+            task.action,
+            Some(TaskAction::Run {
                 command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
-        assert_eq!(service.display, Some(vec![]));
-        assert_eq!(service.require, Vec::<String>::new());
+        assert_eq!(task.display, Some(vec![]));
+        assert_eq!(task.require, Vec::<String>::new());
     }
 
     #[test]
     fn test_run_with_boolean_true() {
         let yaml = r#"
-    default: service
-    services:
-      service:
+    default: task
+    tasks:
+      task:
         run: true
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let service = &config.services["service"];
+        let task = &config.tasks["task"];
         assert_eq!(
-            service.action,
-            Some(ServiceAction::Run {
+            task.action,
+            Some(TaskAction::Run {
                 command: CommandValue::Bool(true),
             })
         );
-        if let Some(ServiceAction::Run { command }) = &service.action {
+        if let Some(TaskAction::Run { command }) = &task.action {
             assert_eq!(command.as_command(), Cow::Borrowed("true"));
         }
     }
@@ -254,20 +254,20 @@ mod tests {
     #[test]
     fn test_run_with_boolean_false() {
         let yaml = r#"
-    default: service
-    services:
-      service:
+    default: task
+    tasks:
+      task:
         run: false
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
-        let service = &config.services["service"];
+        let task = &config.tasks["task"];
         assert_eq!(
-            service.action,
-            Some(ServiceAction::Run {
+            task.action,
+            Some(TaskAction::Run {
                 command: CommandValue::Bool(false),
             })
         );
-        if let Some(ServiceAction::Run { command }) = &service.action {
+        if let Some(TaskAction::Run { command }) = &task.action {
             assert_eq!(command.as_command(), Cow::Borrowed("false"));
         }
     }

@@ -12,7 +12,7 @@ use ratatui::{
 use std::io;
 
 use crate::{
-    config::ServiceAction,
+    config::TaskAction,
     panel::{Panel, StatusPanel, WRAP_INDICATOR, wrap_line},
     ui::ProcessStatus,
 };
@@ -30,7 +30,7 @@ pub fn draw_shutdown(
         for entry in &status_panel.entries {
             let status_str = match (&entry.action_type, entry.status) {
                 (_, ProcessStatus::NotStarted) => "○",
-                (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
+                (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
                     if entry.exit_code == Some(0) {
                         "✓"
                     } else {
@@ -40,7 +40,7 @@ pub fn draw_shutdown(
                 (_, ProcessStatus::Running) => "●",
                 (_, ProcessStatus::Exited) => "✓",
             };
-            lines.push(format!("  {} {}", status_str, entry.service_name));
+            lines.push(format!("  {} {}", status_str, entry.task_name));
         }
 
         lines.push(String::new());
@@ -58,7 +58,7 @@ pub fn draw_shutdown(
     Ok(())
 }
 
-fn render_service_status(status_panel: &StatusPanel) -> Paragraph<'static> {
+fn render_task_status(status_panel: &StatusPanel) -> Paragraph<'static> {
     let (healthy, total, has_issues) = status_panel.get_health_status();
 
     let status_text = if total > 0 {
@@ -73,16 +73,12 @@ fn render_service_status(status_panel: &StatusPanel) -> Paragraph<'static> {
             Span::raw(" healthy"),
         ])
     } else {
-        Line::from("No services")
+        Line::from("No tasks")
     };
 
     Paragraph::new(status_text)
         .alignment(Alignment::Left)
-        .block(
-            Block::default()
-                .title("Service status")
-                .borders(Borders::ALL),
-        )
+        .block(Block::default().title("Task status").borders(Borders::ALL))
 }
 
 pub fn draw_status(
@@ -117,7 +113,7 @@ pub fn draw_status(
 
         let header = Row::new(vec![
             Cell::from("#"),
-            Cell::from("Service").style(header_style),
+            Cell::from("Task").style(header_style),
             Cell::from("Status").style(header_style),
             Cell::from("Previous exit code").style(header_style),
             Cell::from("Dependencies").style(header_style),
@@ -131,17 +127,17 @@ pub fn draw_status(
             .map(|(i, entry)| {
                 let (status_text, status_color) = match (&entry.action_type, entry.status) {
                     (_, ProcessStatus::NotStarted) => ("○ Not started", Color::Gray),
-                    (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
+                    (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
                         if entry.exit_code == Some(0) {
                             ("✓ Completed", Color::Green)
                         } else {
                             ("✗ Failed", Color::Red)
                         }
                     }
-                    (Some(ServiceAction::Start { .. }), ProcessStatus::Running) => {
+                    (Some(TaskAction::Start { .. }), ProcessStatus::Running) => {
                         ("● Running", Color::Green)
                     }
-                    (Some(ServiceAction::Start { .. }), ProcessStatus::Exited) => {
+                    (Some(TaskAction::Start { .. }), ProcessStatus::Exited) => {
                         ("✗ Exited", Color::Red)
                     }
                     (_, ProcessStatus::Running) => ("● Running", Color::Green),
@@ -164,15 +160,14 @@ pub fn draw_status(
                         if j > 0 {
                             spans.push(Span::from(", "));
                         }
-                        let dep_status =
-                            status_panel.entries.iter().find(|e| e.service_name == *dep);
+                        let dep_status = status_panel.entries.iter().find(|e| e.task_name == *dep);
                         let is_down_or_failed = match dep_status {
                             Some(dep_entry) => match (&dep_entry.action_type, dep_entry.status) {
                                 (_, ProcessStatus::NotStarted) => false,
-                                (Some(ServiceAction::Run { .. }), ProcessStatus::Exited) => {
+                                (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
                                     dep_entry.exit_code != Some(0)
                                 }
-                                (Some(ServiceAction::Start { .. }), ProcessStatus::Exited) => true,
+                                (Some(TaskAction::Start { .. }), ProcessStatus::Exited) => true,
                                 (_, ProcessStatus::Exited) => true,
                                 _ => false,
                             },
@@ -192,7 +187,7 @@ pub fn draw_status(
 
                 Row::new(vec![
                     Cell::from((i + 1).to_string()),
-                    Cell::from(entry.service_name.clone()),
+                    Cell::from(entry.task_name.clone()),
                     Cell::from(status_text).style(Style::default().fg(status_color)),
                     Cell::from(exit_code_text).style(Style::default().fg(exit_code_color)),
                     dependencies_cell,
@@ -211,12 +206,12 @@ pub fn draw_status(
             ],
         )
         .header(header)
-        .block(Block::default().title("Services").borders(Borders::ALL));
+        .block(Block::default().title("Tasks").borders(Borders::ALL));
 
         f.render_widget(table, main_area);
 
-        // Render service status
-        let status_widget = render_service_status(status_panel);
+        // Render task status
+        let status_widget = render_task_status(status_panel);
         f.render_widget(status_widget, status_area);
 
         let help_text = [
@@ -366,8 +361,8 @@ pub fn draw(
             f.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
         }
 
-        // Render service status
-        let status_widget = render_service_status(status_panel);
+        // Render task status
+        let status_widget = render_task_status(status_panel);
         f.render_widget(status_widget, status_area);
 
         let help_text = [

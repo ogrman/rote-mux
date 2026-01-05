@@ -8,12 +8,12 @@ A terminal multiplexer for monitoring and managing multiple processes together.
 - TUI Interface: Clean terminal UI with separate panels for each process
 - Real-time Output: View stdout and stderr from all processes in real-time
 - Smart Signal Handling: Graceful shutdown with signal escalation (SIGINT → SIGTERM → SIGKILL)
-- YAML Configuration: Define services and dependencies in a simple config file
+- YAML Configuration: Define tasks and dependencies in a simple config file
 - Process Restart: Restart individual processes on the fly
 - Scrollable Output: Navigate through process output with keyboard controls
 - Stream Filtering: Toggle stdout/stderr visibility per panel
-- Status Panel: View the status of all services at a glance
-- Service Dependencies: Services can require other services to start first
+- Status Panel: View the status of all tasks at a glance
+- Task Dependencies: Tasks can require other tasks to start first
 - Automatic Line Limits: Maximum 5,000 lines per stream to prevent memory issues
 
 ## Installation
@@ -34,7 +34,7 @@ Create a `rote.yaml` file:
 
 ```yaml
 default: ping-demo
-services:
+tasks:
   google-ping:
     start: ping google.com
   cloudflare-ping:
@@ -53,32 +53,32 @@ rote
 
 ### Top-Level Fields
 
-- `default` (optional): The default service to run when none is specified
-- `services`: A mapping of service names to their configurations
+- `default` (optional): The default task to run when none is specified
+- `tasks`: A mapping of task names to their configurations
 
-### Service Definition
+### Task Definition
 
-Each service can have the following properties:
+Each task can have the following properties:
 
-- `start`: Command to start a long-running service
-- `run`: Command to run to completion (blocks dependent services until complete)
+- `start`: Command to start a long-running task
+- `run`: Command to run to completion (blocks dependent tasks until complete)
 - `cwd` (optional): Working directory for the command (relative to the config file)
 - `display` (optional): List of streams to display (["stdout"], ["stderr"], or both by default)
-- `require` (optional): List of services that must be started before this one
-- `autorestart` (optional): If true, automatically restart the service when it exits (default: false)
+- `require` (optional): List of tasks that must be started before this one
+- `autorestart` (optional): If true, automatically restart the task when it exits (default: false)
 
 ### Actions: `start` vs `run`
 
 - `start`: For long-running processes (servers, daemons). These are spawned in the background and their output is displayed in a panel.
-- `run`: For one-time setup tasks (migrations, installations). These run to completion before dependent services start. They do not create a panel.
+- `run`: For one-time setup tasks (migrations, installations). These run to completion before dependent tasks start. They do not create a panel.
 
-These are mutually exclusive - a service can only have one or the other.
+These are mutually exclusive - a task can only have one or the other.
 
 ### Example: Full-Stack Application
 
 ```yaml
 default: dev
-services:
+tasks:
   # One-time setup
   install:
     run: npm install
@@ -112,7 +112,7 @@ services:
 
 ### Display Streams
 
-The `display` field controls which streams are shown for a service:
+The `display` field controls which streams are shown for a task:
 
 - Omit or `null`: Show both stdout and stderr (default)
 - `["stdout"]`: Show only stdout
@@ -122,7 +122,7 @@ The `display` field controls which streams are shown for a service:
 
 ### Dependency Resolution
 
-Services are started in topological order based on their dependencies. Circular dependencies are detected and will cause an error. Services with a `run` action must complete successfully before dependent services start.
+Tasks are started in topological order based on their dependencies. Circular dependencies are detected and will cause an error. Tasks with a `run` action must complete successfully before dependent tasks start.
 
 ## Key Bindings
 
@@ -132,7 +132,7 @@ When running, the following keyboard shortcuts are available:
 - `r`: Restart the currently active process
 - `o`: Toggle stdout visibility for the active panel
 - `e`: Toggle stderr visibility for the active panel
-- `s`: Switch to status panel showing all services
+- `s`: Switch to status panel showing all tasks
 - `1-9`: Switch to panel 1-9
 - `↑/↓`: Scroll up/down one line
 - `PgUp/PgDn`: Scroll up/down 20 lines
@@ -232,7 +232,7 @@ cargo clippy
 
 ## Use Cases
 
-- Development Environments: Manage multiple services during local development
-- Service Orchestration: Manage microservices during development
-- System Administration: Monitor multiple long-running services
-- Testing: Run integration tests with multiple service dependencies
+- Development Environments: Manage multiple tasks during local development
+- Task Orchestration: Manage microservices during development
+- System Administration: Monitor multiple long-running tasks
+- Testing: Run integration tests with multiple task dependencies

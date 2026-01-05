@@ -25,19 +25,19 @@ The only allowed languages are Rust for application code, and bash for scripts u
 
 ## Project Overview
 
-Rote is a terminal multiplexer for monitoring and managing multiple processes. Users define services in YAML with dependencies, and Rote starts them in topological order with a TUI for monitoring output.
+Rote is a terminal multiplexer for monitoring and managing multiple processes. Users define tasks in YAML with dependencies, and Rote starts them in topological order with a TUI for monitoring output.
 
 ## Architecture
 
 ### Core Modules (in `rote/src/`)
 
-- **app.rs**: Main event loop, service lifecycle management. Entry point is `run_with_input()`.
+- **app.rs**: Main event loop, task lifecycle management. Entry point is `run_with_input()`.
 - **config.rs**: YAML parsing. `Config` struct defines the schema. Two action types: `start` (long-running) and `run` (one-time, blocks dependents).
 - **error.rs**: `RoteError` enum (Io, Config, Dependency, Spawn) and `Result<T>` type alias.
-- **panel.rs**: `Panel` holds output buffer per service using Ropey rope. `StatusPanel` tracks all services. MAX_LINES=5000 per stream.
-- **process.rs**: `ServiceInstance` wraps spawned processes. Signal escalation: SIGINT→SIGTERM→SIGKILL with 300ms between each.
+- **panel.rs**: `Panel` holds output buffer per task using Ropey rope. `StatusPanel` tracks all tasks. MAX_LINES=5000 per stream.
+- **process.rs**: `TaskInstance` wraps spawned processes. Signal escalation: SIGINT→SIGTERM→SIGKILL with 300ms between each.
 - **render.rs**: Ratatui rendering for panels and status view.
-- **service_manager.rs**: `ServiceManager` for service lifecycle, `resolve_dependencies()` for topological sort with cycle detection. Tracks `run` service completion to unblock dependents.
+- **task_manager.rs**: `TaskManager` for task lifecycle, `resolve_dependencies()` for topological sort with cycle detection. Tracks `run` task completion to unblock dependents.
 - **signals.rs**: Process existence checking and signal utilities.
 - **ui.rs**: `UiEvent` enum for keyboard, process, and UI events.
 
@@ -45,14 +45,14 @@ Rote is a terminal multiplexer for monitoring and managing multiple processes. U
 
 1. `run_with_input()` spawns keyboard task and status check task (250ms interval)
 2. Events flow through mpsc channel: keyboard input, process output, exit notifications
-3. Services start in dependency order; `run` services block dependents until complete
+3. Tasks start in dependency order; `run` tasks block dependents until complete
 4. Output captured via tokio tasks piping stdout/stderr to panels
 
 ### Key Types
 
-- `ServiceInstance`: Spawned process with PID, stdout/stderr tasks, exit status
-- `Panel`: Service output buffer with filtering (stdout/stderr/status visibility)
-- `StatusPanel`: Overview of all services with health status and exit codes
+- `TaskInstance`: Spawned process with PID, stdout/stderr tasks, exit status
+- `Panel`: Task output buffer with filtering (stdout/stderr/status visibility)
+- `StatusPanel`: Overview of all tasks with health status and exit codes
 - `MessageBuf`: Uses Ropey for efficient text storage with auto-truncation
 
 ## Test Structure

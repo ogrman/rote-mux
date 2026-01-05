@@ -13,7 +13,7 @@ use crate::panel::{PanelIndex, StreamKind};
 use crate::signals::is_process_exited;
 use crate::ui::UiEvent;
 
-pub struct ServiceInstance {
+pub struct TaskInstance {
     pub pid: Option<u32>,
     pub stdout_task: JoinHandle<()>,
     pub stderr_task: JoinHandle<()>,
@@ -22,7 +22,7 @@ pub struct ServiceInstance {
     exit_done: Arc<tokio::sync::Notify>,
 }
 
-impl ServiceInstance {
+impl TaskInstance {
     pub fn spawn(
         panel: PanelIndex,
         cmd: &[String],
@@ -190,7 +190,7 @@ fn spawn_exit_waiter(
         *exit_status.lock().unwrap() = Some(result);
         exit_done.notify_one();
 
-        ServiceInstance::send_exit_event(&tx, panel, exit_status.lock().unwrap().as_ref().unwrap());
+        TaskInstance::send_exit_event(&tx, panel, exit_status.lock().unwrap().as_ref().unwrap());
     })
 }
 
@@ -200,7 +200,7 @@ fn spawn_process(
     cwd: Option<&str>,
     tx: mpsc::Sender<UiEvent>,
     shutdown_rx: tokio::sync::broadcast::Receiver<()>,
-) -> std::io::Result<ServiceInstance> {
+) -> std::io::Result<TaskInstance> {
     // Configure command
     let mut command = Command::new(&cmd[0]);
     command
@@ -242,7 +242,7 @@ fn spawn_process(
         shutdown_rx.resubscribe(),
     );
 
-    Ok(ServiceInstance {
+    Ok(TaskInstance {
         pid,
         stdout_task,
         stderr_task,

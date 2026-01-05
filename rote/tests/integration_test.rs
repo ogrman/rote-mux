@@ -94,19 +94,19 @@ async fn test_can_switch_to_run_task_panel() {
     assert!(result.unwrap().is_ok(), "App should exit successfully");
 }
 
-/// Test that a service with a Run dependency waits for the Run service to complete.
+/// Test that a task with a Run dependency waits for the Run task to complete.
 #[tokio::test]
 async fn test_run_dependency_blocks_until_complete() {
-    use rote::config::{CommandValue, ServiceAction, ServiceConfiguration};
+    use rote::config::{CommandValue, TaskAction, TaskConfiguration};
     use std::borrow::Cow;
 
-    let mut services = HashMap::new();
+    let mut tasks = HashMap::new();
 
-    // A Run service that completes quickly
-    services.insert(
+    // A Run task that completes quickly
+    tasks.insert(
         "setup".to_string(),
-        ServiceConfiguration {
-            action: Some(ServiceAction::Run {
+        TaskConfiguration {
+            action: Some(TaskAction::Run {
                 command: CommandValue::String(Cow::Borrowed("echo setup done")),
             }),
             cwd: None,
@@ -116,11 +116,11 @@ async fn test_run_dependency_blocks_until_complete() {
         },
     );
 
-    // A Start service that depends on setup
-    services.insert(
+    // A Start task that depends on setup
+    tasks.insert(
         "main".to_string(),
-        ServiceConfiguration {
-            action: Some(ServiceAction::Start {
+        TaskConfiguration {
+            action: Some(TaskAction::Start {
                 command: CommandValue::String(Cow::Borrowed("echo main started")),
             }),
             cwd: None,
@@ -132,7 +132,7 @@ async fn test_run_dependency_blocks_until_complete() {
 
     let config = Config {
         default: Some("main".to_string()),
-        services,
+        tasks,
         timestamps: false,
     };
 
@@ -142,7 +142,7 @@ async fn test_run_dependency_blocks_until_complete() {
         rote::run_with_input(config, vec![], std::path::PathBuf::from("."), Some(rx)).await
     });
 
-    // Wait for services to start
+    // Wait for tasks to start
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     // Send exit event

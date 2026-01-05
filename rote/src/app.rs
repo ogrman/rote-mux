@@ -13,12 +13,12 @@ const STATUS_CHECK_INTERVAL_MS: u64 = 250;
 const KEYBOARD_POLL_INTERVAL_MS: u64 = 250;
 
 use crate::{
-    config::{Config, ServiceAction},
+    config::{Config, TaskAction},
     panel::{MessageKind, Panel, PanelIndex, StatusPanel, StreamKind},
-    process::ServiceInstance,
+    process::TaskInstance,
     render,
-    service_manager::{ServiceManager, resolve_dependencies},
     signals::is_process_exited_by_pid,
+    task_manager::{TaskManager, resolve_dependencies},
     ui::{ProcessStatus, UiEvent},
 };
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -38,17 +38,13 @@ fn format_timestamp(timestamps: bool) -> Option<String> {
     }
 }
 
-pub async fn run(
-    config: Config,
-    services_to_run: Vec<String>,
-    config_dir: PathBuf,
-) -> io::Result<()> {
-    run_with_input(config, services_to_run, config_dir, None).await
+pub async fn run(config: Config, tasks_to_run: Vec<String>, config_dir: PathBuf) -> io::Result<()> {
+    run_with_input(config, tasks_to_run, config_dir, None).await
 }
 
 pub async fn run_with_input(
     config: Config,
-    services_to_run: Vec<String>,
+    tasks_to_run: Vec<String>,
     config_dir: PathBuf,
     mut external_rx: Option<tokio::sync::mpsc::Receiver<UiEvent>>,
 ) -> io::Result<()> {
@@ -68,44 +64,44 @@ pub async fn run_with_input(
     let tx = internal_tx.clone();
     let (shutdown_tx, _) = tokio::sync::broadcast::channel::<()>(SHUTDOWN_CHANNEL_SIZE);
 
-    // Resolve which services to run
-    let target_services = if services_to_run.is_empty() {
+    // Resolve which tasks to run
+    let target_tasks = if tasks_to_run.is_empty() {
         if let Some(default) = &config.default {
             vec![default.clone()]
         } else {
             vec![]
         }
     } else {
-        services_to_run
+        tasks_to_run
     };
 
-    // Resolve all dependencies to get the full list of services to start
-    let services_list = resolve_dependencies(&config, &target_services)?;
+    // Resolve all dependencies to get the full list of tasks to start
+    let tasks_list = resolve_dependencies(&config, &target_tasks)?;
 
-    // Create panels for ALL services with actions (not just those being started)
-    // Sort by service name for consistent ordering
+    // Create panels for ALL tasks with actions (not just those being started)
+    // Sort by task name for consistent ordering
     let mut panels = Vec::new();
-    let mut service_to_panel: HashMap<String, PanelIndex> = HashMap::new();
+    let mut task_to_panel: HashMap<String, PanelIndex> = HashMap::new();
 
-    // Collect and sort service names for deterministic panel order
-    let mut service_names: Vec<_> = config
-        .services
+    // Collect and sort task names for deterministic panel order
+    let mut task_names: Vec<_> = config
+        .tasks
         .iter()
         .filter(|(_, cfg)| {
             matches!(
                 cfg.action,
-                Some(ServiceAction::Start { .. }) | Some(ServiceAction::Run { .. })
+                Some(TaskAction::Start { .. }) | Some(TaskAction::Run { .. })
             )
         })
         .map(|(name, _)| name.clone())
         .collect();
-    service_names.sort();
+    task_names.sort();
 
-    for service_name in &service_names {
-        let service_config = config.services.get(service_name).unwrap();
-        // Create panels for services with "start" or "run" actions
-        if let Some(ServiceAction::Start { command }) | Some(ServiceAction::Run { command }) =
-            &service_config.action
+    for task_name in &task_names {
+        let task_config = config.tasks.get(task_name).unwrap();
+        // Create panels for tasks with "start" or "run" actions
+        if let Some(TaskAction::Start { command }) | Some(TaskAction::Run { command }) =
+            &task_config.action
         {
             let cmd = shell_words::split(&command.as_command()).map_err(|e| {
                 io::Error::new(
@@ -114,13 +110,13 @@ pub async fn run_with_input(
                 )
             })?;
 
-            let cwd = service_config.cwd.as_ref().map(|c| {
+            let cwd = task_config.cwd.as_ref().map(|c| {
                 let path = config_dir.join(c);
                 path.to_string_lossy().to_string()
             });
 
             // Determine which streams to show
-            let (show_stdout, show_stderr) = match &service_config.display {
+            let (show_stdout, show_stderr) = match &task_config.display {
                 None => (true, true), // Show both by default
                 Some(streams) => {
                     if streams.is_empty() {
@@ -133,9 +129,9 @@ pub async fn run_with_input(
                 }
             };
 
-            service_to_panel.insert(service_name.clone(), PanelIndex::new(panels.len()));
+            task_to_panel.insert(task_name.clone(), PanelIndex::new(panels.len()));
             panels.push(Panel::new(
-                service_name.clone(),
+                task_name.clone(),
                 cmd,
                 cwd,
                 show_stdout,
@@ -147,45 +143,45 @@ pub async fn run_with_input(
 
     if panels.is_empty() {
         disable_raw_mode()?;
-        eprintln!("No services with 'start' or 'run' action to display");
+        eprintln!("No tasks with 'start' or 'run' action to display");
         return Ok(());
     }
 
-    // Initialize status panel with all services that have actions (sorted order)
+    // Initialize status panel with all tasks that have actions (sorted order)
     let mut status_panel = StatusPanel::new();
-    for service_name in &service_names {
-        let service_config = config.services.get(service_name).unwrap();
-        if let Some(action) = &service_config.action {
-            // Services in services_list are being started, others show as "Not started"
-            let initial_status = if services_list.contains(service_name) {
+    for task_name in &task_names {
+        let task_config = config.tasks.get(task_name).unwrap();
+        if let Some(action) = &task_config.action {
+            // Tasks in tasks_list are being started, others show as "Not started"
+            let initial_status = if tasks_list.contains(task_name) {
                 ProcessStatus::Running
             } else {
                 ProcessStatus::NotStarted
             };
             status_panel.update_entry_with_action(
-                service_name.clone(),
+                task_name.clone(),
                 initial_status,
                 action.clone(),
             );
             status_panel
                 .entry_indices
-                .insert(service_name.clone(), usize::MAX);
-            status_panel.update_dependencies(service_name.clone(), service_config.require.clone());
+                .insert(task_name.clone(), usize::MAX);
+            status_panel.update_dependencies(task_name.clone(), task_config.require.clone());
         }
     }
 
     // Initialize process slots
-    let mut procs: Vec<Option<ServiceInstance>> = (0..panels.len()).map(|_| None).collect();
+    let mut procs: Vec<Option<TaskInstance>> = (0..panels.len()).map(|_| None).collect();
 
-    // Service manager tracks pending services and completed Run services
-    let mut service_manager = ServiceManager::new(services_list.clone(), service_to_panel.clone());
+    // Task manager tracks pending tasks and completed Run tasks
+    let mut task_manager = TaskManager::new(tasks_list.clone(), task_to_panel.clone());
 
     let mut active = PanelIndex::new(0);
     let mut showing_status = true;
     let mut prev_statuses_storage: Option<Vec<ProcessStatus>> = None;
 
-    // Trigger initial service startup
-    let _ = tx.send(UiEvent::StartNextService).await;
+    // Trigger initial task startup
+    let _ = tx.send(UiEvent::StartNextTask).await;
 
     // Periodic status check task
     let status_check_tx = internal_tx.clone();
@@ -321,24 +317,24 @@ pub async fn run_with_input(
                     }
                 }
 
-                status_panel.update_exit_code(panels[*panel].service_name.clone(), exit_code);
+                status_panel.update_exit_code(panels[*panel].task_name.clone(), exit_code);
 
-                // If this was a Run service, mark it as completed and try to start more services
-                let service_name = panels[*panel].service_name.clone();
-                if let Some(service_config) = config.services.get(&service_name) {
-                    if matches!(service_config.action, Some(ServiceAction::Run { .. })) {
+                // If this was a Run task, mark it as completed and try to start more tasks
+                let task_name = panels[*panel].task_name.clone();
+                if let Some(task_config) = config.tasks.get(&task_name) {
+                    if matches!(task_config.action, Some(TaskAction::Run { .. })) {
                         // Only mark as completed if it succeeded
                         if exit_code == Some(0) {
-                            service_manager.mark_run_completed(&service_name);
-                            // Try to start more services
-                            let _ = tx.send(UiEvent::StartNextService).await;
+                            task_manager.mark_run_completed(&task_name);
+                            // Try to start more tasks
+                            let _ = tx.send(UiEvent::StartNextTask).await;
                         }
                     }
 
-                    // Auto-restart if configured (only for Start services, not Run services)
+                    // Auto-restart if configured (only for Start tasks, not Run tasks)
                     // Skip if a new process is already running (e.g., manual restart already happened)
-                    let should_auto_restart = service_config.autorestart
-                        && matches!(service_config.action, Some(ServiceAction::Start { .. }))
+                    let should_auto_restart = task_config.autorestart
+                        && matches!(task_config.action, Some(TaskAction::Start { .. }))
                         && procs[*panel]
                             .as_ref()
                             .map(|p| is_process_exited_by_pid(p.pid))
@@ -367,7 +363,7 @@ pub async fn run_with_input(
                         p.follow = was_following;
 
                         let cwd = panels[*panel].cwd.as_deref();
-                        match ServiceInstance::spawn(
+                        match TaskInstance::spawn(
                             panel,
                             &panels[*panel].cmd,
                             cwd,
@@ -377,7 +373,7 @@ pub async fn run_with_input(
                             Ok(proc) => {
                                 procs[*panel] = Some(proc);
                                 status_panel
-                                    .update_entry(service_name.clone(), ProcessStatus::Running);
+                                    .update_entry(task_name.clone(), ProcessStatus::Running);
                             }
                             Err(e) => {
                                 let timestamp = format_timestamp(panels[*panel].timestamps);
@@ -468,11 +464,11 @@ pub async fn run_with_input(
             UiEvent::CheckStatus => {
                 let mut prev_statuses = prev_statuses_storage.take().unwrap_or_default();
                 if prev_statuses.is_empty() && !procs.is_empty() {
-                    // Initialize with correct status based on whether service is in services_list
+                    // Initialize with correct status based on whether task is in tasks_list
                     prev_statuses = panels
                         .iter()
                         .map(|p| {
-                            if services_list.contains(&p.service_name) {
+                            if tasks_list.contains(&p.task_name) {
                                 ProcessStatus::Running
                             } else {
                                 ProcessStatus::NotStarted
@@ -491,7 +487,7 @@ pub async fn run_with_input(
                             ProcessStatus::Running
                         }
                     } else {
-                        // Preserve NotStarted status for services that were never started
+                        // Preserve NotStarted status for tasks that were never started
                         match prev_statuses.get(i) {
                             Some(ProcessStatus::NotStarted) => ProcessStatus::NotStarted,
                             _ => ProcessStatus::Exited,
@@ -500,7 +496,7 @@ pub async fn run_with_input(
 
                     if prev_statuses.get(i) != Some(&current_status) {
                         any_change = true;
-                        status_panel.update_entry(panels[i].service_name.clone(), current_status);
+                        status_panel.update_entry(panels[i].task_name.clone(), current_status);
                     }
 
                     if i >= prev_statuses.len() {
@@ -518,11 +514,11 @@ pub async fn run_with_input(
             }
 
             UiEvent::Restart => {
-                // Check if service was NotStarted before we potentially terminate it
+                // Check if task was NotStarted before we potentially terminate it
                 let was_not_started = status_panel
                     .entries
                     .iter()
-                    .find(|e| e.service_name == panels[*active].service_name)
+                    .find(|e| e.task_name == panels[*active].task_name)
                     .map(|e| e.status == ProcessStatus::NotStarted)
                     .unwrap_or(false);
 
@@ -575,7 +571,7 @@ pub async fn run_with_input(
                 panels[*active].follow = was_following;
 
                 let cwd = panels[*active].cwd.as_deref();
-                match ServiceInstance::spawn(
+                match TaskInstance::spawn(
                     active,
                     &panels[*active].cmd,
                     cwd,
@@ -611,13 +607,13 @@ pub async fn run_with_input(
                 // Ignore send errors - if all receivers are gone, shutdown proceeds anyway
                 let _ = shutdown_tx.send(());
 
-                // Collect running services
-                let mut running_services: Vec<String> = procs
+                // Collect running tasks
+                let mut running_tasks: Vec<String> = procs
                     .iter()
                     .enumerate()
                     .filter_map(|(i, p)| {
                         if p.is_some() {
-                            Some(panels[i].service_name.clone())
+                            Some(panels[i].task_name.clone())
                         } else {
                             None
                         }
@@ -625,20 +621,20 @@ pub async fn run_with_input(
                     .collect();
 
                 // Helper to print current status (uses ANSI escape to clear to end of line)
-                let print_status = |services: &[String]| {
-                    if services.is_empty() {
-                        print!("\rWaiting for services to shut down: (none)\x1b[K");
+                let print_status = |tasks: &[String]| {
+                    if tasks.is_empty() {
+                        print!("\rWaiting for tasks to shut down: (none)\x1b[K");
                     } else {
                         print!(
-                            "\rWaiting for services to shut down: [{}]\x1b[K",
-                            services.join(", ")
+                            "\rWaiting for tasks to shut down: [{}]\x1b[K",
+                            tasks.join(", ")
                         );
                     }
                     let _ = io::stdout().flush();
                 };
 
-                if enable_terminal && !running_services.is_empty() {
-                    print_status(&running_services);
+                if enable_terminal && !running_tasks.is_empty() {
+                    print_status(&running_tasks);
                 }
 
                 // Terminate and wait for each process synchronously
@@ -651,8 +647,8 @@ pub async fn run_with_input(
 
                         // Remove from running list and update display
                         if enable_terminal {
-                            running_services.retain(|s| s != &panels[i].service_name);
-                            print_status(&running_services);
+                            running_tasks.retain(|s| s != &panels[i].task_name);
+                            print_status(&running_tasks);
                         }
                     }
                 }
@@ -669,16 +665,16 @@ pub async fn run_with_input(
                 break;
             }
 
-            UiEvent::StartNextService => {
-                // Try to start the next service(s) whose dependencies are satisfied
-                let ready_services = service_manager.take_ready_services(&config);
+            UiEvent::StartNextTask => {
+                // Try to start the next task(s) whose dependencies are satisfied
+                let ready_tasks = task_manager.take_ready_tasks(&config);
                 let mut started_any = false;
 
-                for service_name in ready_services {
-                    if let Some(panel_idx) = service_manager.get_panel_index(&service_name) {
+                for task_name in ready_tasks {
+                    if let Some(panel_idx) = task_manager.get_panel_index(&task_name) {
                         let panel = &panels[*panel_idx];
                         let cwd = panel.cwd.as_deref();
-                        match ServiceInstance::spawn(
+                        match TaskInstance::spawn(
                             panel_idx,
                             &panel.cmd,
                             cwd,
@@ -688,7 +684,7 @@ pub async fn run_with_input(
                             Ok(proc) => {
                                 procs[*panel_idx] = Some(proc);
                                 status_panel
-                                    .update_entry(service_name.clone(), ProcessStatus::Running);
+                                    .update_entry(task_name.clone(), ProcessStatus::Running);
                                 started_any = true;
                             }
                             Err(e) => {
@@ -698,8 +694,7 @@ pub async fn run_with_input(
                                     &format!("[spawn failed: {e}]"),
                                     timestamp.as_deref(),
                                 );
-                                status_panel
-                                    .update_entry(service_name.clone(), ProcessStatus::Exited);
+                                status_panel.update_entry(task_name.clone(), ProcessStatus::Exited);
                             }
                         }
                     }
@@ -816,7 +811,7 @@ mod tests {
     fn test_resolve_dependencies_empty() {
         let config = Config {
             default: None,
-            services: HashMap::new(),
+            tasks: HashMap::new(),
             timestamps: false,
         };
         let result = resolve_dependencies(&config, &[]).unwrap();
@@ -825,10 +820,10 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_no_deps() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -839,20 +834,20 @@ mod tests {
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
-        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
-        assert_eq!(result, vec!["service1"]);
+        let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
+        assert_eq!(result, vec!["task1"]);
     }
 
     #[test]
     fn test_resolve_dependencies_with_deps() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -860,9 +855,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep1".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -873,20 +868,20 @@ mod tests {
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
-        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
-        assert_eq!(result, vec!["dep1", "service1"]);
+        let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
+        assert_eq!(result, vec!["dep1", "task1"]);
     }
 
     #[test]
     fn test_resolve_dependencies_multiple_deps() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -894,9 +889,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep1".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -904,9 +899,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep2".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -917,23 +912,23 @@ mod tests {
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
-        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
+        let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
         assert!(result.contains(&"dep1".to_string()));
         assert!(result.contains(&"dep2".to_string()));
-        assert!(result.contains(&"service1".to_string()));
+        assert!(result.contains(&"task1".to_string()));
         assert_eq!(result.len(), 3);
     }
 
     #[test]
     fn test_resolve_dependencies_nested_deps() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -941,9 +936,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep1".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -951,9 +946,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep2".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -964,45 +959,45 @@ mod tests {
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
-        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
-        assert_eq!(result, vec!["dep2", "dep1", "service1"]);
+        let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
+        assert_eq!(result, vec!["dep2", "dep1", "task1"]);
     }
 
     #[test]
     fn test_resolve_dependencies_circular() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
-                require: vec!["service2".to_string()],
+                require: vec!["task2".to_string()],
                 autorestart: false,
             },
         );
-        services.insert(
-            "service2".to_string(),
-            crate::config::ServiceConfiguration {
+        tasks.insert(
+            "task2".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
-                require: vec!["service1".to_string()],
+                require: vec!["task1".to_string()],
                 autorestart: false,
             },
         );
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
-        let result = resolve_dependencies(&config, &["service1".to_string()]);
+        let result = resolve_dependencies(&config, &["task1".to_string()]);
         assert!(result.is_err());
         assert!(
             result
@@ -1013,10 +1008,10 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_dependencies_service_not_found() {
+    fn test_resolve_dependencies_task_not_found() {
         let config = Config {
             default: None,
-            services: HashMap::new(),
+            tasks: HashMap::new(),
             timestamps: false,
         };
 
@@ -1032,10 +1027,10 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_dep_not_found() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1046,20 +1041,20 @@ mod tests {
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
-        let result = resolve_dependencies(&config, &["service1".to_string()]);
+        let result = resolve_dependencies(&config, &["task1".to_string()]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_resolve_dependencies_multiple_targets() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1067,9 +1062,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
-            "service2".to_string(),
-            crate::config::ServiceConfiguration {
+        tasks.insert(
+            "task2".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1077,9 +1072,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep1".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1090,25 +1085,24 @@ mod tests {
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
         let result =
-            resolve_dependencies(&config, &["service1".to_string(), "service2".to_string()])
-                .unwrap();
+            resolve_dependencies(&config, &["task1".to_string(), "task2".to_string()]).unwrap();
         assert!(result.contains(&"dep1".to_string()));
-        assert!(result.contains(&"service1".to_string()));
-        assert!(result.contains(&"service2".to_string()));
+        assert!(result.contains(&"task1".to_string()));
+        assert!(result.contains(&"task2".to_string()));
         assert_eq!(result.len(), 3);
     }
 
     #[test]
     fn test_resolve_dependencies_diamond_graph() {
-        let mut services = HashMap::new();
-        services.insert(
-            "service1".to_string(),
-            crate::config::ServiceConfiguration {
+        let mut tasks = HashMap::new();
+        tasks.insert(
+            "task1".to_string(),
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1116,9 +1110,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep1".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1126,9 +1120,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "dep2".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1136,9 +1130,9 @@ mod tests {
                 autorestart: false,
             },
         );
-        services.insert(
+        tasks.insert(
             "base".to_string(),
-            crate::config::ServiceConfiguration {
+            crate::config::TaskConfiguration {
                 action: None,
                 cwd: None,
                 display: None,
@@ -1149,15 +1143,15 @@ mod tests {
 
         let config = Config {
             default: None,
-            services,
+            tasks,
             timestamps: false,
         };
 
-        let result = resolve_dependencies(&config, &["service1".to_string()]).unwrap();
+        let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
         assert_eq!(result.len(), 4);
         assert_eq!(result[0], "base");
         assert!(result.contains(&"dep1".to_string()));
         assert!(result.contains(&"dep2".to_string()));
-        assert_eq!(result[3], "service1");
+        assert_eq!(result[3], "task1");
     }
 }

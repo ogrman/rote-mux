@@ -172,7 +172,7 @@ pub fn wrap_line(line: &str, width: usize) -> Vec<(bool, String)> {
 
 pub struct Panel {
     pub title: String,
-    pub service_name: String,
+    pub task_name: String,
     pub cmd: Vec<String>,
     pub cwd: Option<String>,
     pub messages: MessageBuf,
@@ -187,7 +187,7 @@ pub struct Panel {
 
 impl Panel {
     pub fn new(
-        service_name: String,
+        task_name: String,
         cmd: Vec<String>,
         cwd: Option<String>,
         show_stdout: bool,
@@ -195,8 +195,8 @@ impl Panel {
         timestamps: bool,
     ) -> Self {
         Self {
-            title: service_name.clone(),
-            service_name,
+            title: task_name.clone(),
+            task_name,
             cmd,
             cwd,
             messages: MessageBuf::new(),
@@ -240,10 +240,10 @@ pub struct StatusPanel {
 
 #[derive(Clone)]
 pub struct StatusEntry {
-    pub service_name: String,
+    pub task_name: String,
     pub status: crate::ui::ProcessStatus,
     pub exit_code: Option<i32>,
-    pub action_type: Option<crate::config::ServiceAction>,
+    pub action_type: Option<crate::config::TaskAction>,
     pub dependencies: Vec<String>,
 }
 
@@ -253,16 +253,13 @@ impl StatusPanel {
     }
 
     /// Get a mutable reference to an entry, creating it if it doesn't exist.
-    fn get_or_create_entry(&mut self, service_name: &str) -> &mut StatusEntry {
-        let pos = self
-            .entries
-            .iter()
-            .position(|e| e.service_name == service_name);
+    fn get_or_create_entry(&mut self, task_name: &str) -> &mut StatusEntry {
+        let pos = self.entries.iter().position(|e| e.task_name == task_name);
         match pos {
             Some(idx) => &mut self.entries[idx],
             None => {
                 self.entries.push(StatusEntry {
-                    service_name: service_name.to_string(),
+                    task_name: task_name.to_string(),
                     status: crate::ui::ProcessStatus::Exited,
                     exit_code: None,
                     action_type: None,
@@ -273,37 +270,29 @@ impl StatusPanel {
         }
     }
 
-    pub fn update_entry(&mut self, service_name: String, status: crate::ui::ProcessStatus) {
-        self.get_or_create_entry(&service_name).status = status;
+    pub fn update_entry(&mut self, task_name: String, status: crate::ui::ProcessStatus) {
+        self.get_or_create_entry(&task_name).status = status;
     }
 
-    pub fn update_exit_code(&mut self, service_name: String, exit_code: Option<i32>) {
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|e| e.service_name == service_name)
-        {
+    pub fn update_exit_code(&mut self, task_name: String, exit_code: Option<i32>) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.task_name == task_name) {
             entry.exit_code = exit_code;
         }
     }
 
     pub fn update_entry_with_action(
         &mut self,
-        service_name: String,
+        task_name: String,
         status: crate::ui::ProcessStatus,
-        action_type: crate::config::ServiceAction,
+        action_type: crate::config::TaskAction,
     ) {
-        let entry = self.get_or_create_entry(&service_name);
+        let entry = self.get_or_create_entry(&task_name);
         entry.status = status;
         entry.action_type = Some(action_type);
     }
 
-    pub fn update_dependencies(&mut self, service_name: String, dependencies: Vec<String>) {
-        if let Some(entry) = self
-            .entries
-            .iter_mut()
-            .find(|e| e.service_name == service_name)
-        {
+    pub fn update_dependencies(&mut self, task_name: String, dependencies: Vec<String>) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.task_name == task_name) {
             entry.dependencies = dependencies;
         }
     }
@@ -313,7 +302,7 @@ impl StatusPanel {
         let mut healthy = 0;
 
         for entry in &self.entries {
-            // Skip services that haven't started yet
+            // Skip tasks that haven't started yet
             if entry.status == crate::ui::ProcessStatus::NotStarted {
                 continue;
             }
@@ -323,11 +312,11 @@ impl StatusPanel {
 
                 let is_healthy = match (&entry.action_type, entry.status) {
                     (
-                        Some(crate::config::ServiceAction::Run { .. }),
+                        Some(crate::config::TaskAction::Run { .. }),
                         crate::ui::ProcessStatus::Exited,
                     ) => entry.exit_code == Some(0),
                     (
-                        Some(crate::config::ServiceAction::Start { .. }),
+                        Some(crate::config::TaskAction::Start { .. }),
                         crate::ui::ProcessStatus::Running,
                     ) => true,
                     _ => false,
@@ -347,7 +336,7 @@ impl StatusPanel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::ServiceAction;
+    use crate::config::TaskAction;
 
     #[test]
     fn test_message_buf_new() {
@@ -445,7 +434,7 @@ mod tests {
     #[test]
     fn test_panel_new() {
         let panel = Panel::new(
-            "test-service".to_string(),
+            "test-task".to_string(),
             vec!["echo".to_string(), "hello".to_string()],
             Some("/tmp".to_string()),
             true,
@@ -453,8 +442,8 @@ mod tests {
             false,
         );
 
-        assert_eq!(panel.title, "test-service");
-        assert_eq!(panel.service_name, "test-service");
+        assert_eq!(panel.title, "test-task");
+        assert_eq!(panel.task_name, "test-task");
         assert_eq!(panel.cmd, vec!["echo".to_string(), "hello".to_string()]);
         assert_eq!(panel.cwd, Some("/tmp".to_string()));
         assert_eq!(panel.scroll, 0);
@@ -468,7 +457,7 @@ mod tests {
     #[test]
     fn test_panel_new_with_defaults() {
         let panel = Panel::new(
-            "service".to_string(),
+            "task".to_string(),
             vec!["command".to_string()],
             None,
             false,
@@ -476,7 +465,7 @@ mod tests {
             false,
         );
 
-        assert_eq!(panel.title, "service");
+        assert_eq!(panel.title, "task");
         assert_eq!(panel.cwd, None);
         assert!(!panel.show_stdout);
         assert!(!panel.show_stderr);
@@ -541,10 +530,10 @@ mod tests {
     #[test]
     fn test_status_panel_update_entry_new() {
         let mut panel = StatusPanel::new();
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Running);
 
         assert_eq!(panel.entries.len(), 1);
-        assert_eq!(panel.entries[0].service_name, "service1");
+        assert_eq!(panel.entries[0].task_name, "task1");
         assert_eq!(panel.entries[0].status, crate::ui::ProcessStatus::Running);
         assert_eq!(panel.entries[0].exit_code, None);
         assert_eq!(panel.entries[0].action_type, None);
@@ -553,8 +542,8 @@ mod tests {
     #[test]
     fn test_status_panel_update_entry_existing() {
         let mut panel = StatusPanel::new();
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Exited);
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Exited);
 
         assert_eq!(panel.entries.len(), 1);
         assert_eq!(panel.entries[0].status, crate::ui::ProcessStatus::Exited);
@@ -563,12 +552,12 @@ mod tests {
     #[test]
     fn test_status_panel_update_exit_code() {
         let mut panel = StatusPanel::new();
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
-        panel.update_exit_code("service1".to_string(), Some(0));
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_exit_code("task1".to_string(), Some(0));
 
         assert_eq!(panel.entries[0].exit_code, Some(0));
 
-        panel.update_exit_code("service1".to_string(), Some(1));
+        panel.update_exit_code("task1".to_string(), Some(1));
         assert_eq!(panel.entries[0].exit_code, Some(1));
     }
 
@@ -583,9 +572,9 @@ mod tests {
     fn test_status_panel_update_entry_with_action_new() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
-            "service1".to_string(),
+            "task1".to_string(),
             crate::ui::ProcessStatus::Running,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -593,11 +582,11 @@ mod tests {
         );
 
         assert_eq!(panel.entries.len(), 1);
-        assert_eq!(panel.entries[0].service_name, "service1");
+        assert_eq!(panel.entries[0].task_name, "task1");
         assert_eq!(panel.entries[0].status, crate::ui::ProcessStatus::Running);
         assert!(matches!(
             panel.entries[0].action_type,
-            Some(ServiceAction::Start { .. })
+            Some(TaskAction::Start { .. })
         ));
     }
 
@@ -605,18 +594,18 @@ mod tests {
     fn test_status_panel_update_entry_with_action_existing() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
-            "service1".to_string(),
+            "task1".to_string(),
             crate::ui::ProcessStatus::Running,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
             },
         );
         panel.update_entry_with_action(
-            "service1".to_string(),
+            "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Run {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test2",
                 )),
@@ -627,7 +616,7 @@ mod tests {
         assert_eq!(panel.entries[0].status, crate::ui::ProcessStatus::Exited);
         assert!(matches!(
             panel.entries[0].action_type,
-            Some(ServiceAction::Run { .. })
+            Some(TaskAction::Run { .. })
         ));
     }
 
@@ -644,42 +633,42 @@ mod tests {
     #[test]
     fn test_status_entry_clone() {
         let entry = StatusEntry {
-            service_name: "test".to_string(),
+            task_name: "test".to_string(),
             status: crate::ui::ProcessStatus::Running,
             exit_code: None,
             action_type: None,
             dependencies: Vec::new(),
         };
         let cloned = entry.clone();
-        assert_eq!(entry.service_name, cloned.service_name);
+        assert_eq!(entry.task_name, cloned.task_name);
         assert_eq!(entry.status, cloned.status);
     }
 
     #[test]
     fn test_status_panel_multiple_entries() {
         let mut panel = StatusPanel::new();
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
-        panel.update_entry("service2".to_string(), crate::ui::ProcessStatus::Exited);
-        panel.update_exit_code("service2".to_string(), Some(1));
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_entry("task2".to_string(), crate::ui::ProcessStatus::Exited);
+        panel.update_exit_code("task2".to_string(), Some(1));
 
         assert_eq!(panel.entries.len(), 2);
-        assert!(panel.entries.iter().any(|e| e.service_name == "service1"));
-        assert!(panel.entries.iter().any(|e| e.service_name == "service2"));
+        assert!(panel.entries.iter().any(|e| e.task_name == "task1"));
+        assert!(panel.entries.iter().any(|e| e.task_name == "task2"));
     }
 
     #[test]
     fn test_status_panel_update_dependencies() {
         let mut panel = StatusPanel::new();
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Running);
         panel.update_dependencies(
-            "service1".to_string(),
+            "task1".to_string(),
             vec!["dep1".to_string(), "dep2".to_string()],
         );
 
         let entry = panel
             .entries
             .iter()
-            .find(|e| e.service_name == "service1")
+            .find(|e| e.task_name == "task1")
             .unwrap();
         assert_eq!(entry.dependencies, vec!["dep1", "dep2"]);
     }
@@ -687,13 +676,13 @@ mod tests {
     #[test]
     fn test_status_panel_update_dependencies_empty() {
         let mut panel = StatusPanel::new();
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
-        panel.update_dependencies("service1".to_string(), vec![]);
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_dependencies("task1".to_string(), vec![]);
 
         let entry = panel
             .entries
             .iter()
-            .find(|e| e.service_name == "service1")
+            .find(|e| e.task_name == "task1")
             .unwrap();
         assert!(entry.dependencies.is_empty());
     }
@@ -711,15 +700,15 @@ mod tests {
     fn test_get_health_status_all_healthy_run() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
-            "service1".to_string(),
+            "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Run {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
             },
         );
-        panel.update_exit_code("service1".to_string(), Some(0));
+        panel.update_exit_code("task1".to_string(), Some(0));
 
         let (healthy, total, has_issues) = panel.get_health_status();
         assert_eq!(healthy, 1);
@@ -731,15 +720,15 @@ mod tests {
     fn test_get_health_status_unhealthy_run_nonzero_exit() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
-            "service1".to_string(),
+            "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Run {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
             },
         );
-        panel.update_exit_code("service1".to_string(), Some(1));
+        panel.update_exit_code("task1".to_string(), Some(1));
 
         let (healthy, total, has_issues) = panel.get_health_status();
         assert_eq!(healthy, 0);
@@ -751,9 +740,9 @@ mod tests {
     fn test_get_health_status_healthy_start_running() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
-            "service1".to_string(),
+            "task1".to_string(),
             crate::ui::ProcessStatus::Running,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -770,9 +759,9 @@ mod tests {
     fn test_get_health_status_unhealthy_start_exited() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
-            "service1".to_string(),
+            "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -792,7 +781,7 @@ mod tests {
         panel.update_entry_with_action(
             "run_success".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Run {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo success",
                 )),
@@ -803,7 +792,7 @@ mod tests {
         panel.update_entry_with_action(
             "run_failure".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Run {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo failure",
                 )),
@@ -814,7 +803,7 @@ mod tests {
         panel.update_entry_with_action(
             "start_running".to_string(),
             crate::ui::ProcessStatus::Running,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo start",
                 )),
@@ -824,7 +813,7 @@ mod tests {
         panel.update_entry_with_action(
             "start_exited".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo start",
                 )),
@@ -842,8 +831,8 @@ mod tests {
     #[test]
     fn test_get_health_status_ignores_no_action() {
         let mut panel = StatusPanel::new();
-        panel.update_entry("service1".to_string(), crate::ui::ProcessStatus::Running);
-        panel.update_entry("service2".to_string(), crate::ui::ProcessStatus::Exited);
+        panel.update_entry("task1".to_string(), crate::ui::ProcessStatus::Running);
+        panel.update_entry("task2".to_string(), crate::ui::ProcessStatus::Exited);
 
         let (healthy, total, has_issues) = panel.get_health_status();
         assert_eq!(healthy, 0);
@@ -858,7 +847,7 @@ mod tests {
         panel.update_entry_with_action(
             "run1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Run {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed("echo 1")),
             },
         );
@@ -867,7 +856,7 @@ mod tests {
         panel.update_entry_with_action(
             "run2".to_string(),
             crate::ui::ProcessStatus::Exited,
-            ServiceAction::Run {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed("echo 2")),
             },
         );
@@ -876,7 +865,7 @@ mod tests {
         panel.update_entry_with_action(
             "start1".to_string(),
             crate::ui::ProcessStatus::Running,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo start",
                 )),
@@ -893,22 +882,22 @@ mod tests {
     fn test_get_health_status_excludes_not_started() {
         let mut panel = StatusPanel::new();
 
-        // A service that has started and is running - should be counted
+        // A task that has started and is running - should be counted
         panel.update_entry_with_action(
             "started".to_string(),
             crate::ui::ProcessStatus::Running,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo started",
                 )),
             },
         );
 
-        // A service that hasn't started yet - should NOT be counted
+        // A task that hasn't started yet - should NOT be counted
         panel.update_entry_with_action(
             "pending".to_string(),
             crate::ui::ProcessStatus::NotStarted,
-            ServiceAction::Start {
+            TaskAction::Start {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo pending",
                 )),
