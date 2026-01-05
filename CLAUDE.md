@@ -21,6 +21,7 @@ Always run `cargo test` after making changes. Fix any failing tests.
 Always run `cargo fmt` after all tests pass.
 Whenever the config format changes, update `example.yaml` and `README.md`.
 Integration test scripts should have names starting with the test name.
+The only allowed languages are Rust for application code, and bash for scripts used in tests.
 
 ## Project Overview
 
@@ -30,13 +31,15 @@ Rote is a terminal multiplexer for monitoring and managing multiple processes. U
 
 ### Core Modules (in `rote/src/`)
 
-- **app.rs**: Main event loop, dependency resolution (topological sort with cycle detection), service lifecycle management. Entry point is `run_with_input()`.
+- **app.rs**: Main event loop, service lifecycle management. Entry point is `run_with_input()`.
 - **config.rs**: YAML parsing. `Config` struct defines the schema. Two action types: `start` (long-running) and `run` (one-time, blocks dependents).
-- **process.rs**: `ServiceInstance` wraps spawned processes. Signal escalation: SIGINT→SIGTERM→SIGKILL with 300ms between each.
+- **error.rs**: `RoteError` enum (Io, Config, Dependency, Spawn) and `Result<T>` type alias.
 - **panel.rs**: `Panel` holds output buffer per service using Ropey rope. `StatusPanel` tracks all services. MAX_LINES=5000 per stream.
+- **process.rs**: `ServiceInstance` wraps spawned processes. Signal escalation: SIGINT→SIGTERM→SIGKILL with 300ms between each.
 - **render.rs**: Ratatui rendering for panels and status view.
-- **ui.rs**: `UiEvent` enum for keyboard, process, and UI events.
+- **service_manager.rs**: `ServiceManager` for service lifecycle, `resolve_dependencies()` for topological sort with cycle detection. Tracks `run` service completion to unblock dependents.
 - **signals.rs**: Process existence checking and signal utilities.
+- **ui.rs**: `UiEvent` enum for keyboard, process, and UI events.
 
 ### Event Flow
 
@@ -57,10 +60,3 @@ Rote is a terminal multiplexer for monitoring and managing multiple processes. U
 - Unit tests embedded in source files via `#[cfg(test)]` modules
 - Integration tests in `tests/`: `integration_test.rs`, `process_tests.rs`
 - Test fixtures in `tests/data/`: YAML configs and shell scripts for signal handling tests
-
-## Outstanding Work
-
-See `TODO.md` for current tasks. Key incomplete items:
-- Timestamp support for log messages
-- Panels for services that haven't started yet
-- Async service startup with immediate status screen
