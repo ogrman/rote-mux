@@ -53,6 +53,11 @@ impl ServiceInstance {
         }
     }
 
+    /// Get the exit status Arc for use after partial moves
+    pub fn exit_status_arc(&self) -> Arc<Mutex<Option<std::io::Result<std::process::ExitStatus>>>> {
+        self.exit_status.clone()
+    }
+
     pub async fn terminate(&self) {
         let Some(pid) = self.pid else {
             return;

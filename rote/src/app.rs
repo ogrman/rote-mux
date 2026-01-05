@@ -294,26 +294,34 @@ pub async fn run_with_input(
                 status,
                 exit_code,
             } => {
-                let p = &mut panels[*panel];
-                let was_following = p.follow;
+                // Skip if a new process is already running (restart handler already added exit message)
+                let new_process_running = procs[*panel]
+                    .as_ref()
+                    .map(|p| !is_process_exited_by_pid(p.pid))
+                    .unwrap_or(false);
 
-                let msg = format!(
-                    "[exited: {}]",
-                    status.map(|s| s.to_string()).unwrap_or("unknown".into())
-                );
-                let timestamp = format_timestamp(p.timestamps);
-                p.messages
-                    .push(MessageKind::Status, &msg, timestamp.as_deref());
+                if !new_process_running {
+                    let p = &mut panels[*panel];
+                    let was_following = p.follow;
 
-                // Update scroll to show the exit message if following
-                if was_following {
-                    let max_len = p.visible_len();
-                    if max_len > 0 {
-                        p.scroll = max_len - 1;
+                    let msg = format!(
+                        "[exited: {}]",
+                        status.map(|s| s.to_string()).unwrap_or("unknown".into())
+                    );
+                    let timestamp = format_timestamp(p.timestamps);
+                    p.messages
+                        .push(MessageKind::Status, &msg, timestamp.as_deref());
+
+                    // Update scroll to show the exit message if following
+                    if was_following {
+                        let max_len = p.visible_len();
+                        if max_len > 0 {
+                            p.scroll = max_len - 1;
+                        }
                     }
                 }
 
-                status_panel.update_exit_code(p.service_name.clone(), exit_code);
+                status_panel.update_exit_code(panels[*panel].service_name.clone(), exit_code);
 
                 // If this was a Run service, mark it as completed and try to start more services
                 let service_name = panels[*panel].service_name.clone();
@@ -527,11 +535,33 @@ pub async fn run_with_input(
                     .unwrap_or(false);
 
                 if let Some(proc) = procs[*active].take() {
+                    // Get exit status Arc before awaiting (which partially moves proc)
+                    let exit_status_arc = proc.exit_status_arc();
+
                     proc.terminate().await;
                     // Wait for the process to fully exit and all I/O to drain
                     let _ = proc.wait_task.await;
                     let _ = proc.stdout_task.await;
                     let _ = proc.stderr_task.await;
+
+                    // Add exit message before restart message
+                    let exit_status = exit_status_arc.lock().unwrap();
+                    if let Some(Ok(status)) = exit_status.as_ref() {
+                        use std::os::unix::process::ExitStatusExt;
+                        let exit_code = status.code().or_else(|| status.signal().map(|s| 128 + s));
+                        let msg = format!(
+                            "[exited: {}]",
+                            exit_code
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "unknown".into())
+                        );
+                        let timestamp = format_timestamp(panels[*active].timestamps);
+                        panels[*active].messages.push(
+                            MessageKind::Status,
+                            &msg,
+                            timestamp.as_deref(),
+                        );
+                    }
                 }
 
                 let was_following = panels[*active].follow;
