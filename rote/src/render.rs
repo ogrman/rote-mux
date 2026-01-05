@@ -30,7 +30,7 @@ pub fn draw_shutdown(
         for entry in &status_panel.entries {
             let status_str = match (&entry.action_type, entry.status) {
                 (_, ProcessStatus::NotStarted) => "○",
-                (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
+                (Some(TaskAction::Ensure { .. }), ProcessStatus::Exited) => {
                     if entry.exit_code == Some(0) {
                         "✓"
                     } else {
@@ -127,17 +127,17 @@ pub fn draw_status(
             .map(|(i, entry)| {
                 let (status_text, status_color) = match (&entry.action_type, entry.status) {
                     (_, ProcessStatus::NotStarted) => ("○ Not started", Color::Gray),
-                    (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
+                    (Some(TaskAction::Ensure { .. }), ProcessStatus::Exited) => {
                         if entry.exit_code == Some(0) {
                             ("✓ Completed", Color::Green)
                         } else {
                             ("✗ Failed", Color::Red)
                         }
                     }
-                    (Some(TaskAction::Start { .. }), ProcessStatus::Running) => {
+                    (Some(TaskAction::Run { .. }), ProcessStatus::Running) => {
                         ("● Running", Color::Green)
                     }
-                    (Some(TaskAction::Start { .. }), ProcessStatus::Exited) => {
+                    (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
                         ("✗ Exited", Color::Red)
                     }
                     (_, ProcessStatus::Running) => ("● Running", Color::Green),
@@ -164,10 +164,10 @@ pub fn draw_status(
                         let is_down_or_failed = match dep_status {
                             Some(dep_entry) => match (&dep_entry.action_type, dep_entry.status) {
                                 (_, ProcessStatus::NotStarted) => false,
-                                (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
+                                (Some(TaskAction::Ensure { .. }), ProcessStatus::Exited) => {
                                     dep_entry.exit_code != Some(0)
                                 }
-                                (Some(TaskAction::Start { .. }), ProcessStatus::Exited) => true,
+                                (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => true,
                                 (_, ProcessStatus::Exited) => true,
                                 _ => false,
                             },

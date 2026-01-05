@@ -36,9 +36,9 @@ Create a `rote.yaml` file:
 default: ping-demo
 tasks:
   google-ping:
-    start: ping google.com
+    run: ping google.com
   cloudflare-ping:
-    start: ping 1.1.1.1
+    run: ping 1.1.1.1
   ping-demo:
     require: [google-ping, cloudflare-ping]
 ```
@@ -60,17 +60,17 @@ rote
 
 Each task can have the following properties:
 
-- `start`: Command to start a long-running task
-- `run`: Command to run to completion (blocks dependent tasks until complete)
+- `run`: Command to start a long-running task
+- `ensure`: Command to run to completion (blocks dependent tasks until complete)
 - `cwd` (optional): Working directory for the command (relative to the config file)
 - `display` (optional): List of streams to display (["stdout"], ["stderr"], or both by default)
 - `require` (optional): List of tasks that must be started before this one
 - `autorestart` (optional): If true, automatically restart the task when it exits (default: false)
 
-### Actions: `start` vs `run`
+### Actions: `run` vs `ensure`
 
-- `start`: For long-running processes (servers, daemons). These are spawned in the background and their output is displayed in a panel.
-- `run`: For one-time setup tasks (migrations, installations). These run to completion before dependent tasks start. They do not create a panel.
+- `run`: For long-running processes (servers, daemons). These are spawned in the background and their output is displayed in a panel.
+- `ensure`: For one-time setup tasks (migrations, installations). These run to completion before dependent tasks start. They do not create a panel.
 
 These are mutually exclusive - a task can only have one or the other.
 
@@ -81,28 +81,28 @@ default: dev
 tasks:
   # One-time setup
   install:
-    run: npm install
+    ensure: npm install
 
   # Database
   postgres:
-    start: docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres
+    run: docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres
     display: [stderr]
 
   # Run migrations after DB is ready
   migrate:
-    run: alembic upgrade head
+    ensure: alembic upgrade head
     require: [postgres, install]
 
   # Backend server
   api:
     cwd: backend
-    start: npm run start
+    run: npm run start
     require: [migrate]
 
   # Frontend dev server
   web:
     cwd: frontend
-    start: npm run dev
+    run: npm run dev
     require: [install]
 
   # Development target
@@ -122,7 +122,7 @@ The `display` field controls which streams are shown for a task:
 
 ### Dependency Resolution
 
-Tasks are started in topological order based on their dependencies. Circular dependencies are detected and will cause an error. Tasks with a `run` action must complete successfully before dependent tasks start.
+Tasks are started in topological order based on their dependencies. Circular dependencies are detected and will cause an error. Tasks with an `ensure` action must complete successfully before dependent tasks start.
 
 ## Key Bindings
 

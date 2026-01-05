@@ -312,11 +312,11 @@ impl StatusPanel {
 
                 let is_healthy = match (&entry.action_type, entry.status) {
                     (
-                        Some(crate::config::TaskAction::Run { .. }),
+                        Some(crate::config::TaskAction::Ensure { .. }),
                         crate::ui::ProcessStatus::Exited,
                     ) => entry.exit_code == Some(0),
                     (
-                        Some(crate::config::TaskAction::Start { .. }),
+                        Some(crate::config::TaskAction::Run { .. }),
                         crate::ui::ProcessStatus::Running,
                     ) => true,
                     _ => false,
@@ -574,7 +574,7 @@ mod tests {
         panel.update_entry_with_action(
             "task1".to_string(),
             crate::ui::ProcessStatus::Running,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -586,7 +586,7 @@ mod tests {
         assert_eq!(panel.entries[0].status, crate::ui::ProcessStatus::Running);
         assert!(matches!(
             panel.entries[0].action_type,
-            Some(TaskAction::Start { .. })
+            Some(TaskAction::Run { .. })
         ));
     }
 
@@ -596,7 +596,7 @@ mod tests {
         panel.update_entry_with_action(
             "task1".to_string(),
             crate::ui::ProcessStatus::Running,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -605,7 +605,7 @@ mod tests {
         panel.update_entry_with_action(
             "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Run {
+            TaskAction::Ensure {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test2",
                 )),
@@ -616,7 +616,7 @@ mod tests {
         assert_eq!(panel.entries[0].status, crate::ui::ProcessStatus::Exited);
         assert!(matches!(
             panel.entries[0].action_type,
-            Some(TaskAction::Run { .. })
+            Some(TaskAction::Ensure { .. })
         ));
     }
 
@@ -697,12 +697,12 @@ mod tests {
     }
 
     #[test]
-    fn test_get_health_status_all_healthy_run() {
+    fn test_get_health_status_all_healthy_ensure() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
             "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Run {
+            TaskAction::Ensure {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -717,12 +717,12 @@ mod tests {
     }
 
     #[test]
-    fn test_get_health_status_unhealthy_run_nonzero_exit() {
+    fn test_get_health_status_unhealthy_ensure_nonzero_exit() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
             "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Run {
+            TaskAction::Ensure {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -737,12 +737,12 @@ mod tests {
     }
 
     #[test]
-    fn test_get_health_status_healthy_start_running() {
+    fn test_get_health_status_healthy_run_running() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
             "task1".to_string(),
             crate::ui::ProcessStatus::Running,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -756,12 +756,12 @@ mod tests {
     }
 
     #[test]
-    fn test_get_health_status_unhealthy_start_exited() {
+    fn test_get_health_status_unhealthy_run_exited() {
         let mut panel = StatusPanel::new();
         panel.update_entry_with_action(
             "task1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo test",
                 )),
@@ -779,43 +779,43 @@ mod tests {
         let mut panel = StatusPanel::new();
 
         panel.update_entry_with_action(
-            "run_success".to_string(),
+            "ensure_success".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Run {
+            TaskAction::Ensure {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo success",
                 )),
             },
         );
-        panel.update_exit_code("run_success".to_string(), Some(0));
+        panel.update_exit_code("ensure_success".to_string(), Some(0));
 
         panel.update_entry_with_action(
-            "run_failure".to_string(),
+            "ensure_failure".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Run {
+            TaskAction::Ensure {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo failure",
                 )),
             },
         );
-        panel.update_exit_code("run_failure".to_string(), Some(1));
+        panel.update_exit_code("ensure_failure".to_string(), Some(1));
 
         panel.update_entry_with_action(
-            "start_running".to_string(),
+            "run_running".to_string(),
             crate::ui::ProcessStatus::Running,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
-                    "echo start",
+                    "echo run",
                 )),
             },
         );
 
         panel.update_entry_with_action(
-            "start_exited".to_string(),
+            "run_exited".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
-                    "echo start",
+                    "echo run",
                 )),
             },
         );
@@ -845,29 +845,29 @@ mod tests {
         let mut panel = StatusPanel::new();
 
         panel.update_entry_with_action(
-            "run1".to_string(),
+            "ensure1".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Run {
+            TaskAction::Ensure {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed("echo 1")),
             },
         );
-        panel.update_exit_code("run1".to_string(), Some(0));
+        panel.update_exit_code("ensure1".to_string(), Some(0));
 
         panel.update_entry_with_action(
-            "run2".to_string(),
+            "ensure2".to_string(),
             crate::ui::ProcessStatus::Exited,
-            TaskAction::Run {
+            TaskAction::Ensure {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed("echo 2")),
             },
         );
-        panel.update_exit_code("run2".to_string(), Some(0));
+        panel.update_exit_code("ensure2".to_string(), Some(0));
 
         panel.update_entry_with_action(
-            "start1".to_string(),
+            "run1".to_string(),
             crate::ui::ProcessStatus::Running,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
-                    "echo start",
+                    "echo run",
                 )),
             },
         );
@@ -886,7 +886,7 @@ mod tests {
         panel.update_entry_with_action(
             "started".to_string(),
             crate::ui::ProcessStatus::Running,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo started",
                 )),
@@ -897,7 +897,7 @@ mod tests {
         panel.update_entry_with_action(
             "pending".to_string(),
             crate::ui::ProcessStatus::NotStarted,
-            TaskAction::Start {
+            TaskAction::Run {
                 command: crate::config::CommandValue::String(std::borrow::Cow::Borrowed(
                     "echo pending",
                 )),

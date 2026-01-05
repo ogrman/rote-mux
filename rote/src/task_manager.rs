@@ -8,8 +8,8 @@ use crate::panel::PanelIndex;
 pub struct TaskManager {
     /// Tasks waiting to be started (in dependency order).
     pending_tasks: Vec<String>,
-    /// Run tasks that have completed successfully.
-    completed_run_tasks: HashSet<String>,
+    /// Ensure tasks that have completed successfully.
+    completed_ensure_tasks: HashSet<String>,
     /// Mapping from task name to panel index.
     task_to_panel: HashMap<String, PanelIndex>,
 }
@@ -19,14 +19,14 @@ impl TaskManager {
     pub fn new(tasks_to_start: Vec<String>, task_to_panel: HashMap<String, PanelIndex>) -> Self {
         Self {
             pending_tasks: tasks_to_start,
-            completed_run_tasks: HashSet::new(),
+            completed_ensure_tasks: HashSet::new(),
             task_to_panel,
         }
     }
 
-    /// Mark a Run task as completed (exit code 0).
-    pub fn mark_run_completed(&mut self, task_name: &str) {
-        self.completed_run_tasks.insert(task_name.to_string());
+    /// Mark an Ensure task as completed (exit code 0).
+    pub fn mark_ensure_completed(&mut self, task_name: &str) {
+        self.completed_ensure_tasks.insert(task_name.to_string());
     }
 
     /// Get the panel index for a task.
@@ -34,7 +34,7 @@ impl TaskManager {
         self.task_to_panel.get(task_name).copied()
     }
 
-    /// Get tasks that are ready to start (all Run dependencies satisfied).
+    /// Get tasks that are ready to start (all Ensure dependencies satisfied).
     /// Returns the tasks and removes them from the pending list.
     pub fn take_ready_tasks(&mut self, config: &Config) -> Vec<String> {
         let mut ready = Vec::new();
@@ -42,7 +42,7 @@ impl TaskManager {
 
         while i < self.pending_tasks.len() {
             let task_name = &self.pending_tasks[i];
-            if self.are_run_deps_satisfied(task_name, config) {
+            if self.are_ensure_deps_satisfied(task_name, config) {
                 ready.push(self.pending_tasks.remove(i));
             } else {
                 i += 1;
@@ -52,18 +52,18 @@ impl TaskManager {
         ready
     }
 
-    /// Check if all Run dependencies for a task have completed successfully.
-    fn are_run_deps_satisfied(&self, task_name: &str, config: &Config) -> bool {
+    /// Check if all Ensure dependencies for a task have completed successfully.
+    fn are_ensure_deps_satisfied(&self, task_name: &str, config: &Config) -> bool {
         let Some(task_config) = config.tasks.get(task_name) else {
             return true;
         };
 
         task_config.require.iter().all(|dep| {
             if let Some(dep_config) = config.tasks.get(dep) {
-                if matches!(dep_config.action, Some(TaskAction::Run { .. })) {
-                    self.completed_run_tasks.contains(dep)
+                if matches!(dep_config.action, Some(TaskAction::Ensure { .. })) {
+                    self.completed_ensure_tasks.contains(dep)
                 } else {
-                    true // Start dependencies don't block
+                    true // Run dependencies don't block
                 }
             } else {
                 true // Unknown dep, assume satisfied
@@ -206,11 +206,11 @@ mod tests {
     }
 
     #[test]
-    fn test_task_manager_take_ready_with_run_dep() {
+    fn test_task_manager_take_ready_with_ensure_dep() {
         let config = make_config_with_tasks(vec![
             (
                 "setup",
-                Some(TaskAction::Run {
+                Some(TaskAction::Ensure {
                     command: CommandValue::String(Cow::Borrowed("echo setup")),
                 }),
                 vec![],
@@ -229,18 +229,18 @@ mod tests {
         assert_eq!(tm.pending_tasks, vec!["task1"]);
 
         // After marking setup as complete, task1 should be ready
-        tm.mark_run_completed("setup");
+        tm.mark_ensure_completed("setup");
         let ready = tm.take_ready_tasks(&config);
         assert_eq!(ready, vec!["task1"]);
         assert!(tm.pending_tasks.is_empty());
     }
 
     #[test]
-    fn test_task_manager_start_dep_does_not_block() {
+    fn test_task_manager_run_dep_does_not_block() {
         let config = make_config_with_tasks(vec![
             (
                 "server",
-                Some(TaskAction::Start {
+                Some(TaskAction::Run {
                     command: CommandValue::String(Cow::Borrowed("server")),
                 }),
                 vec![],
@@ -253,7 +253,7 @@ mod tests {
             HashMap::new(),
         );
 
-        // Both should be ready since Start deps don't block
+        // Both should be ready since Run deps don't block
         let ready = tm.take_ready_tasks(&config);
         assert_eq!(ready.len(), 2);
     }

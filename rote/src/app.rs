@@ -90,7 +90,7 @@ pub async fn run_with_input(
         .filter(|(_, cfg)| {
             matches!(
                 cfg.action,
-                Some(TaskAction::Start { .. }) | Some(TaskAction::Run { .. })
+                Some(TaskAction::Run { .. }) | Some(TaskAction::Ensure { .. })
             )
         })
         .map(|(name, _)| name.clone())
@@ -99,8 +99,8 @@ pub async fn run_with_input(
 
     for task_name in &task_names {
         let task_config = config.tasks.get(task_name).unwrap();
-        // Create panels for tasks with "start" or "run" actions
-        if let Some(TaskAction::Start { command }) | Some(TaskAction::Run { command }) =
+        // Create panels for tasks with "run" or "ensure" actions
+        if let Some(TaskAction::Run { command }) | Some(TaskAction::Ensure { command }) =
             &task_config.action
         {
             let cmd = shell_words::split(&command.as_command()).map_err(|e| {
@@ -143,7 +143,7 @@ pub async fn run_with_input(
 
     if panels.is_empty() {
         disable_raw_mode()?;
-        eprintln!("No tasks with 'start' or 'run' action to display");
+        eprintln!("No tasks with 'run' or 'ensure' action to display");
         return Ok(());
     }
 
@@ -319,22 +319,22 @@ pub async fn run_with_input(
 
                 status_panel.update_exit_code(panels[*panel].task_name.clone(), exit_code);
 
-                // If this was a Run task, mark it as completed and try to start more tasks
+                // If this was an Ensure task, mark it as completed and try to start more tasks
                 let task_name = panels[*panel].task_name.clone();
                 if let Some(task_config) = config.tasks.get(&task_name) {
-                    if matches!(task_config.action, Some(TaskAction::Run { .. })) {
+                    if matches!(task_config.action, Some(TaskAction::Ensure { .. })) {
                         // Only mark as completed if it succeeded
                         if exit_code == Some(0) {
-                            task_manager.mark_run_completed(&task_name);
+                            task_manager.mark_ensure_completed(&task_name);
                             // Try to start more tasks
                             let _ = tx.send(UiEvent::StartNextTask).await;
                         }
                     }
 
-                    // Auto-restart if configured (only for Start tasks, not Run tasks)
+                    // Auto-restart if configured (only for Run tasks, not Ensure tasks)
                     // Skip if a new process is already running (e.g., manual restart already happened)
                     let should_auto_restart = task_config.autorestart
-                        && matches!(task_config.action, Some(TaskAction::Start { .. }))
+                        && matches!(task_config.action, Some(TaskAction::Run { .. }))
                         && procs[*panel]
                             .as_ref()
                             .map(|p| is_process_exited_by_pid(p.pid))

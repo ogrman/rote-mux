@@ -94,19 +94,19 @@ async fn test_can_switch_to_run_task_panel() {
     assert!(result.unwrap().is_ok(), "App should exit successfully");
 }
 
-/// Test that a task with a Run dependency waits for the Run task to complete.
+/// Test that a task with an Ensure dependency waits for the Ensure task to complete.
 #[tokio::test]
-async fn test_run_dependency_blocks_until_complete() {
+async fn test_ensure_dependency_blocks_until_complete() {
     use rote::config::{CommandValue, TaskAction, TaskConfiguration};
     use std::borrow::Cow;
 
     let mut tasks = HashMap::new();
 
-    // A Run task that completes quickly
+    // An Ensure task that completes quickly
     tasks.insert(
         "setup".to_string(),
         TaskConfiguration {
-            action: Some(TaskAction::Run {
+            action: Some(TaskAction::Ensure {
                 command: CommandValue::String(Cow::Borrowed("echo setup done")),
             }),
             cwd: None,
@@ -116,11 +116,11 @@ async fn test_run_dependency_blocks_until_complete() {
         },
     );
 
-    // A Start task that depends on setup
+    // A Run task that depends on setup
     tasks.insert(
         "main".to_string(),
         TaskConfiguration {
-            action: Some(TaskAction::Start {
+            action: Some(TaskAction::Run {
                 command: CommandValue::String(Cow::Borrowed("echo main started")),
             }),
             cwd: None,

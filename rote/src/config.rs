@@ -35,19 +35,19 @@ pub struct TaskConfiguration {
 
 /// Represents the action to be performed for a task.
 ///
-/// This can either be a `run` action or a `start` action, each containing
-/// a command to be executed. `run` is used for something that should run
-/// to completion before the task is considered ready, while `start` is used
+/// This can either be an `ensure` action or a `run` action, each containing
+/// a command to be executed. `ensure` is used for something that should run
+/// to completion before the task is considered ready, while `run` is used
 /// for long-running tasks. These are mutually exclusive.
 #[derive(Debug, Deserialize, PartialEq, Clone)]
 #[serde(untagged)]
 pub enum TaskAction {
-    Run {
-        #[serde(rename = "run")]
+    Ensure {
+        #[serde(rename = "ensure")]
         command: CommandValue,
     },
-    Start {
-        #[serde(rename = "start")]
+    Run {
+        #[serde(rename = "run")]
         command: CommandValue,
     },
 }
@@ -85,26 +85,26 @@ mod tests {
     #[test]
     fn test_deserialize_action() {
         {
-            let yaml_run = r#"
-                run: echo 'Hello, World!'
+            let yaml_ensure = r#"
+                ensure: echo 'Hello, World!'
                 "#;
-            let action: TaskAction = serde_yaml::from_str(yaml_run).unwrap();
+            let action: TaskAction = serde_yaml::from_str(yaml_ensure).unwrap();
             assert_eq!(
                 action,
-                TaskAction::Run {
+                TaskAction::Ensure {
                     command: CommandValue::String(Cow::Borrowed("echo 'Hello, World!'")),
                 },
             );
         }
 
         {
-            let yaml_start = r#"
-                start: ./start_task.sh
+            let yaml_run = r#"
+                run: ./start_task.sh
                 "#;
-            let action: TaskAction = serde_yaml::from_str(yaml_start).unwrap();
+            let action: TaskAction = serde_yaml::from_str(yaml_run).unwrap();
             assert_eq!(
                 action,
-                TaskAction::Start {
+                TaskAction::Run {
                     command: CommandValue::String(Cow::Borrowed("./start_task.sh")),
                 }
             );
@@ -118,7 +118,7 @@ mod tests {
         let map = &config.tasks;
         assert_eq!(
             map["google-ping"].action,
-            Some(TaskAction::Start {
+            Some(TaskAction::Run {
                 command: CommandValue::String(Cow::Borrowed("ping google.com")),
             })
         );
@@ -126,7 +126,7 @@ mod tests {
 
         assert_eq!(
             map["cloudflare-ping"].action,
-            Some(TaskAction::Start {
+            Some(TaskAction::Run {
                 command: CommandValue::String(Cow::Borrowed("ping 1.1.1.1")),
             }),
         );
@@ -146,7 +146,7 @@ mod tests {
         // Check setup-task task
         assert_eq!(
             map["setup-task"].action,
-            Some(TaskAction::Run {
+            Some(TaskAction::Ensure {
                 command: CommandValue::Bool(true),
             })
         );
@@ -158,13 +158,13 @@ mod tests {
     default: task
     tasks:
       task:
-        run: echo 'hi'
+        ensure: echo 'hi'
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let task = &config.tasks["task"];
         assert_eq!(
             task.action,
-            Some(TaskAction::Run {
+            Some(TaskAction::Ensure {
                 command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
@@ -195,14 +195,14 @@ mod tests {
             default: task
             tasks:
                 task:
-                    run: echo 'hi'
+                    ensure: echo 'hi'
                     extra: value
             "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let task = &config.tasks["task"];
         assert_eq!(
             task.action,
-            Some(TaskAction::Run {
+            Some(TaskAction::Ensure {
                 command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
@@ -214,7 +214,7 @@ mod tests {
     default: task
     tasks:
       task:
-        run: echo 'hi'
+        ensure: echo 'hi'
         display: []
         require: []
     "#;
@@ -222,7 +222,7 @@ mod tests {
         let task = &config.tasks["task"];
         assert_eq!(
             task.action,
-            Some(TaskAction::Run {
+            Some(TaskAction::Ensure {
                 command: CommandValue::String(Cow::Borrowed("echo 'hi'")),
             })
         );
@@ -231,43 +231,43 @@ mod tests {
     }
 
     #[test]
-    fn test_run_with_boolean_true() {
+    fn test_ensure_with_boolean_true() {
         let yaml = r#"
     default: task
     tasks:
       task:
-        run: true
+        ensure: true
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let task = &config.tasks["task"];
         assert_eq!(
             task.action,
-            Some(TaskAction::Run {
+            Some(TaskAction::Ensure {
                 command: CommandValue::Bool(true),
             })
         );
-        if let Some(TaskAction::Run { command }) = &task.action {
+        if let Some(TaskAction::Ensure { command }) = &task.action {
             assert_eq!(command.as_command(), Cow::Borrowed("true"));
         }
     }
 
     #[test]
-    fn test_run_with_boolean_false() {
+    fn test_ensure_with_boolean_false() {
         let yaml = r#"
     default: task
     tasks:
       task:
-        run: false
+        ensure: false
     "#;
         let config: Config = serde_yaml::from_str(yaml).unwrap();
         let task = &config.tasks["task"];
         assert_eq!(
             task.action,
-            Some(TaskAction::Run {
+            Some(TaskAction::Ensure {
                 command: CommandValue::Bool(false),
             })
         );
-        if let Some(TaskAction::Run { command }) = &task.action {
+        if let Some(TaskAction::Ensure { command }) = &task.action {
             assert_eq!(command.as_command(), Cow::Borrowed("false"));
         }
     }

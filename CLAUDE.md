@@ -32,12 +32,12 @@ Rote is a terminal multiplexer for monitoring and managing multiple processes. U
 ### Core Modules (in `rote/src/`)
 
 - **app.rs**: Main event loop, task lifecycle management. Entry point is `run_with_input()`.
-- **config.rs**: YAML parsing. `Config` struct defines the schema. Two action types: `start` (long-running) and `run` (one-time, blocks dependents).
+- **config.rs**: YAML parsing. `Config` struct defines the schema. Two action types: `run` (long-running) and `ensure` (one-time, blocks dependents).
 - **error.rs**: `RoteError` enum (Io, Config, Dependency, Spawn) and `Result<T>` type alias.
 - **panel.rs**: `Panel` holds output buffer per task using Ropey rope. `StatusPanel` tracks all tasks. MAX_LINES=5000 per stream.
 - **process.rs**: `TaskInstance` wraps spawned processes. Signal escalation: SIGINT→SIGTERM→SIGKILL with 300ms between each.
 - **render.rs**: Ratatui rendering for panels and status view.
-- **task_manager.rs**: `TaskManager` for task lifecycle, `resolve_dependencies()` for topological sort with cycle detection. Tracks `run` task completion to unblock dependents.
+- **task_manager.rs**: `TaskManager` for task lifecycle, `resolve_dependencies()` for topological sort with cycle detection. Tracks `ensure` task completion to unblock dependents.
 - **signals.rs**: Process existence checking and signal utilities.
 - **ui.rs**: `UiEvent` enum for keyboard, process, and UI events.
 
@@ -45,7 +45,7 @@ Rote is a terminal multiplexer for monitoring and managing multiple processes. U
 
 1. `run_with_input()` spawns keyboard task and status check task (250ms interval)
 2. Events flow through mpsc channel: keyboard input, process output, exit notifications
-3. Tasks start in dependency order; `run` tasks block dependents until complete
+3. Tasks start in dependency order; `ensure` tasks block dependents until complete
 4. Output captured via tokio tasks piping stdout/stderr to panels
 
 ### Key Types
