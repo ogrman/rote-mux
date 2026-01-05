@@ -398,17 +398,9 @@ pub async fn run_with_input(
                 let p = &mut panels[*active];
                 let visible_len = p.visible_len();
                 let max = visible_len.saturating_sub(1);
-                // Compute minimum scroll based on terminal height to prevent scrolling past start
-                let height = terminal
-                    .size()
-                    .map(|s| s.height.saturating_sub(2) as usize)
-                    .unwrap_or(20);
-                let min_scroll = if visible_len <= height {
-                    visible_len.saturating_sub(1)
-                } else {
-                    height.saturating_sub(1)
-                };
-                let new = (p.scroll as i32 + delta).clamp(min_scroll as i32, max as i32) as usize;
+                // Scroll operates on logical lines. Allow scrolling from 0 to max.
+                // With line wrapping, even a small number of logical lines may need scrolling.
+                let new = (p.scroll as i32 + delta).clamp(0, max as i32) as usize;
                 p.follow = new == max;
                 p.scroll = new;
                 redraw = true;

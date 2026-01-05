@@ -455,6 +455,7 @@ dependencies = [
  "serde_yaml",
  "shell-words",
  "tokio",
+ "unicode-width",
 ]
 
 [[package]]

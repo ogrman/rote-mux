@@ -1,6 +1,7 @@
 use ropey::Rope;
 use std::collections::HashMap;
 use std::ops::Deref;
+use unicode_width::UnicodeWidthChar;
 
 pub const MAX_LINES: usize = 5_000;
 
@@ -122,6 +123,53 @@ impl MessageBuf {
     }
 }
 
+/// Wrap indicator shown at the start of continuation lines.
+pub const WRAP_INDICATOR: &str = "↪ ";
+/// Display width of the wrap indicator.
+pub const WRAP_INDICATOR_WIDTH: usize = 2;
+
+/// Wrap a line to fit within the given width, returning visual line segments.
+/// The first segment uses full width, continuation segments are prefixed with WRAP_INDICATOR.
+/// Returns (is_continuation, content) pairs.
+pub fn wrap_line(line: &str, width: usize) -> Vec<(bool, String)> {
+    if width == 0 {
+        return vec![(false, line.to_string())];
+    }
+
+    let mut result = Vec::new();
+    let chars = line.chars();
+    let mut current_width = 0;
+    let mut current_segment = String::new();
+    let mut is_first = true;
+
+    for c in chars {
+        let char_width = c.width().unwrap_or(0);
+        let effective_width = if is_first {
+            width
+        } else {
+            width.saturating_sub(WRAP_INDICATOR_WIDTH)
+        };
+
+        if current_width + char_width > effective_width && !current_segment.is_empty() {
+            // Current segment is full, push it and start a new one
+            result.push((!is_first, current_segment));
+            current_segment = String::new();
+            current_width = 0;
+            is_first = false;
+        }
+
+        current_segment.push(c);
+        current_width += char_width;
+    }
+
+    // Push the last segment if non-empty, or if the line was empty push one empty segment
+    if !current_segment.is_empty() || result.is_empty() {
+        result.push((!is_first, current_segment));
+    }
+
+    result
+}
+
 pub struct Panel {
     pub title: String,
     pub service_name: String,
@@ -171,6 +219,15 @@ impl Panel {
         self.messages
             .lines_filtered(self.show_stdout, self.show_stderr, self.show_status)
             .len()
+    }
+
+    /// Compute total visual lines when wrapped to the given width.
+    pub fn total_visual_lines(&self, width: usize) -> usize {
+        self.messages
+            .lines_filtered(self.show_stdout, self.show_stderr, self.show_status)
+            .iter()
+            .map(|(_, line)| wrap_line(line, width).len())
+            .sum()
     }
 }
 
@@ -910,5 +967,86 @@ mod tests {
 
         assert_eq!(a, b);
         assert_eq!(a, c);
+    }
+
+    #[test]
+    fn test_wrap_line_short_line() {
+        let result = wrap_line("short", 20);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (false, "short".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_line_exact_fit() {
+        let result = wrap_line("12345", 5);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (false, "12345".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_line_needs_wrap() {
+        let result = wrap_line("hello world", 5);
+        // "hello" (5), " worl" (5 - 2 for indicator = 3), "d" (remaining)
+        assert!(result.len() >= 2);
+        assert!(!result[0].0); // First segment is not continuation
+        assert!(result[1].0); // Second segment is continuation
+    }
+
+    #[test]
+    fn test_wrap_line_empty() {
+        let result = wrap_line("", 20);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (false, "".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_line_zero_width() {
+        let result = wrap_line("test", 0);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (false, "test".to_string()));
+    }
+
+    #[test]
+    fn test_wrap_line_unicode() {
+        // Test with CJK characters (2-column width each)
+        let result = wrap_line("你好世界", 4);
+        // Each CJK char is 2 columns wide, so "你好" (4 cols) fits in first segment
+        // "世界" would need continuation
+        assert!(result.len() >= 2);
+    }
+
+    #[test]
+    fn test_wrap_line_continuation_marker() {
+        let result = wrap_line("abcdefghij", 5);
+        // First segment: "abcde" (5 chars)
+        // Second segment is continuation, gets WRAP_INDICATOR prefix
+        // So effective width is 5 - 2 = 3 chars: "fgh"
+        // Third segment: "ij"
+        assert_eq!(result[0], (false, "abcde".to_string()));
+        assert!(result[1].0); // is_continuation = true
+        assert!(result.len() >= 2);
+    }
+
+    #[test]
+    fn test_total_visual_lines() {
+        let mut panel = Panel::new(
+            "test".to_string(),
+            vec!["echo".to_string()],
+            None,
+            true,
+            false,
+            false,
+        );
+        // Add a short line and a long line
+        panel.messages.push(MessageKind::Stdout, "short", None);
+        panel.messages.push(
+            MessageKind::Stdout,
+            "this is a very long line that should wrap",
+            None,
+        );
+
+        // With width 10, the long line should wrap
+        let visual = panel.total_visual_lines(10);
+        assert!(visual > 2); // More visual lines than logical lines
     }
 }

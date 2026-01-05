@@ -13,7 +13,7 @@ use std::io;
 
 use crate::{
     config::ServiceAction,
-    panel::{Panel, StatusPanel},
+    panel::{Panel, StatusPanel, WRAP_INDICATOR, wrap_line},
     ui::ProcessStatus,
 };
 
@@ -69,10 +69,7 @@ fn render_service_status(status_panel: &StatusPanel) -> Paragraph<'static> {
             Style::default().fg(Color::Green)
         };
         Line::from(vec![
-            Span::styled(
-                format!("{} {}/{}", status_icon, healthy, total),
-                status_style,
-            ),
+            Span::styled(format!("{status_icon} {healthy}/{total}"), status_style),
             Span::raw(" healthy"),
         ])
     } else {
@@ -266,6 +263,8 @@ pub fn draw(
         let help_area = sidebar_chunks[1];
 
         let height = content_area.height.saturating_sub(2) as usize;
+        // Inner width for text (subtract 2 for borders)
+        let inner_width = content_area.width.saturating_sub(2) as usize;
 
         let filtered_lines =
             panel
@@ -274,26 +273,66 @@ pub fn draw(
 
         let total_lines = filtered_lines.len();
 
-        // Calculate start and end positions, ensuring we show as many lines as possible
-        // without scrolling beyond the start of the buffer
-        let (start, end) = if total_lines == 0 {
-            (0, 0)
-        } else if total_lines <= height {
-            // All lines fit on screen, show them all
-            (0, total_lines)
-        } else {
-            // More lines than can fit, compute based on scroll
-            // Clamp scroll to ensure we don't scroll past the start
-            let effective_scroll = panel.scroll.clamp(height - 1, total_lines - 1);
-            let start = effective_scroll - (height - 1);
-            let end = effective_scroll + 1;
-            (start, end)
-        };
-        let text = filtered_lines[start..end]
+        // Build visual lines by wrapping logical lines, working backwards from scroll position
+        // panel.scroll is the index of the bottom logical line to show
+        let mut visual_lines: Vec<String> = Vec::new();
+
+        if total_lines > 0 {
+            // Clamp scroll to valid range
+            let effective_scroll = if total_lines <= height {
+                // If all logical lines fit when not wrapped, show from the end
+                total_lines.saturating_sub(1)
+            } else {
+                panel
+                    .scroll
+                    .clamp(height.saturating_sub(1), total_lines.saturating_sub(1))
+            };
+
+            // Work backwards from the scroll position, collecting wrapped lines
+            let mut logical_idx = effective_scroll as i32;
+            while logical_idx >= 0 && visual_lines.len() < height {
+                let (_, line) = &filtered_lines[logical_idx as usize];
+                let wrapped = wrap_line(line, inner_width);
+
+                // Add wrapped segments in reverse order (we're building bottom-up)
+                for (is_continuation, segment) in wrapped.into_iter().rev() {
+                    if visual_lines.len() >= height {
+                        break;
+                    }
+                    let display_line = if is_continuation {
+                        format!("{WRAP_INDICATOR}{segment}")
+                    } else {
+                        segment
+                    };
+                    visual_lines.push(display_line);
+                }
+                logical_idx -= 1;
+            }
+
+            // Reverse to get top-to-bottom order
+            visual_lines.reverse();
+        }
+
+        // Count total visual lines for scrollbar
+        let total_visual_lines: usize = filtered_lines
             .iter()
-            .map(|(_, line)| format!("{line}\n"))
-            .collect::<Vec<String>>()
-            .join("");
+            .map(|(_, line)| wrap_line(line, inner_width).len())
+            .sum();
+
+        // Calculate visual scroll position for scrollbar (approximate)
+        let visual_scroll_pos = if total_lines > 0 {
+            let effective_scroll = panel.scroll.min(total_lines.saturating_sub(1));
+            // Sum visual lines up to scroll position
+            filtered_lines[..=effective_scroll]
+                .iter()
+                .map(|(_, line)| wrap_line(line, inner_width).len())
+                .sum::<usize>()
+                .saturating_sub(1)
+        } else {
+            0
+        };
+
+        let text = visual_lines.join("\n");
 
         let title = format!(
             "{} [stdout: {}, stderr: {}]",
@@ -307,13 +346,16 @@ pub fn draw(
 
         f.render_widget(widget, content_area);
 
-        // Render scrollbar if there are more lines than can fit on screen
-        if total_lines > height {
+        // Render scrollbar if there are more visual lines than can fit on screen
+        if total_visual_lines > height {
             let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None)
                 .end_symbol(None);
-            let mut scrollbar_state =
-                ScrollbarState::new(total_lines.saturating_sub(height)).position(start);
+            let scrollbar_range = total_visual_lines.saturating_sub(height);
+            let scrollbar_pos = visual_scroll_pos
+                .saturating_sub(height.saturating_sub(1))
+                .min(scrollbar_range);
+            let mut scrollbar_state = ScrollbarState::new(scrollbar_range).position(scrollbar_pos);
             // Render inside the border (inset by 1 on top and bottom)
             let scrollbar_area = ratatui::layout::Rect {
                 x: content_area.x + content_area.width.saturating_sub(1),
