@@ -1,12 +1,13 @@
+use indexmap::IndexMap;
 use serde::Deserialize;
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     /// The default task to run when none is specified.
     pub default: Option<String>,
-    /// A mapping of task names to their configurations.
-    pub tasks: HashMap<String, TaskConfiguration>,
+    /// A mapping of task names to their configurations (preserves YAML order).
+    pub tasks: IndexMap<String, TaskConfiguration>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,6 +150,44 @@ mod tests {
             Some(TaskAction::Ensure {
                 command: CommandValue::Bool(true),
             })
+        );
+    }
+
+    #[test]
+    fn test_task_order_preserved_from_yaml() {
+        let yaml = r#"
+default: main
+tasks:
+  first:
+    run: echo first
+  second:
+    run: echo second
+  third:
+    run: echo third
+  fourth:
+    ensure: true
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task_names: Vec<_> = config.tasks.keys().collect();
+        assert_eq!(task_names, vec!["first", "second", "third", "fourth"]);
+    }
+
+    #[test]
+    fn test_example_yaml_task_order() {
+        let config = load_config();
+        let task_names: Vec<_> = config.tasks.keys().collect();
+        // Tasks should be in the order they appear in example.yaml
+        assert_eq!(
+            task_names,
+            vec![
+                "google-ping",
+                "cloudflare-ping",
+                "github-ping",
+                "short-lived",
+                "auto-restarting",
+                "setup-task",
+                "ping-demo"
+            ]
         );
     }
 

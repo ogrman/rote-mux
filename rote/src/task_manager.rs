@@ -130,10 +130,11 @@ pub fn resolve_dependencies(config: &Config, targets: &[String]) -> Result<Vec<S
 mod tests {
     use super::*;
     use crate::config::{CommandValue, TaskConfiguration};
+    use indexmap::IndexMap;
     use std::borrow::Cow;
 
     fn make_config_with_tasks(tasks: Vec<(&str, Option<TaskAction>, Vec<&str>)>) -> Config {
-        let mut task_map = HashMap::new();
+        let mut task_map = IndexMap::new();
         for (name, action, require) in tasks {
             task_map.insert(
                 name.to_string(),

@@ -1,6 +1,6 @@
+use indexmap::IndexMap;
 use rote_mux::panel::PanelIndex;
 use rote_mux::{Config, UiEvent};
-use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::timeout;
 
@@ -100,7 +100,7 @@ async fn test_ensure_dependency_blocks_until_complete() {
     use rote_mux::config::{CommandValue, TaskAction, TaskConfiguration};
     use std::borrow::Cow;
 
-    let mut tasks = HashMap::new();
+    let mut tasks = IndexMap::new();
 
     // An Ensure task that completes quickly
     tasks.insert(

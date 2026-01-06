@@ -74,12 +74,12 @@ pub async fn run_with_input(
     let tasks_list = resolve_dependencies(&config, &target_tasks)?;
 
     // Create panels for ALL tasks with actions (not just those being started)
-    // Sort by task name for consistent ordering
+    // Panels are ordered according to their order in the YAML config file
     let mut panels = Vec::new();
     let mut task_to_panel: HashMap<String, PanelIndex> = HashMap::new();
 
-    // Collect and sort task names for deterministic panel order
-    let mut task_names: Vec<_> = config
+    // Collect task names, preserving YAML file order (IndexMap preserves insertion order)
+    let task_names: Vec<_> = config
         .tasks
         .iter()
         .filter(|(_, cfg)| {
@@ -90,7 +90,6 @@ pub async fn run_with_input(
         })
         .map(|(name, _)| name.clone())
         .collect();
-    task_names.sort();
 
     for task_name in &task_names {
         let task_config = config.tasks.get(task_name).unwrap();
@@ -142,7 +141,7 @@ pub async fn run_with_input(
         return Ok(());
     }
 
-    // Initialize status panel with all tasks that have actions (sorted order)
+    // Initialize status panel with all tasks that have actions (YAML file order)
     let mut status_panel = StatusPanel::new();
     for task_name in &task_names {
         let task_config = config.tasks.get(task_name).unwrap();
@@ -784,6 +783,92 @@ fn toggle_stream_visibility(panel: &mut Panel, show: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexMap;
+
+    use crate::config::{CommandValue, TaskConfiguration};
+    use std::borrow::Cow;
+
+    /// Helper to extract panel names from a config in the order they would be created.
+    /// This mirrors the logic in run_with_input for creating panels.
+    fn get_panel_order(config: &Config) -> Vec<String> {
+        config
+            .tasks
+            .iter()
+            .filter(|(_, cfg)| {
+                matches!(
+                    cfg.action,
+                    Some(TaskAction::Run { .. }) | Some(TaskAction::Ensure { .. })
+                )
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn test_panel_order_matches_yaml_order() {
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "third".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Run {
+                    command: CommandValue::String(Cow::Borrowed("echo third")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec![],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+        tasks.insert(
+            "first".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Run {
+                    command: CommandValue::String(Cow::Borrowed("echo first")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec![],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+        tasks.insert(
+            "second".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Ensure {
+                    command: CommandValue::String(Cow::Borrowed("echo second")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec![],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+        // Task without action should be excluded from panels
+        tasks.insert(
+            "no-action".to_string(),
+            TaskConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["first".to_string()],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+
+        let config = Config {
+            default: None,
+            tasks,
+        };
+
+        let panel_order = get_panel_order(&config);
+        // Panels should be in insertion order (third, first, second), not alphabetical
+        // The "no-action" task should be excluded since it has no run/ensure action
+        assert_eq!(panel_order, vec!["third", "first", "second"]);
+    }
 
     #[test]
     fn test_visible_len_empty_panel() {
@@ -849,7 +934,7 @@ mod tests {
     fn test_resolve_dependencies_empty() {
         let config = Config {
             default: None,
-            tasks: HashMap::new(),
+            tasks: IndexMap::new(),
         };
         let result = resolve_dependencies(&config, &[]).unwrap();
         assert!(result.is_empty());
@@ -857,7 +942,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_no_deps() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {
@@ -881,7 +966,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_with_deps() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {
@@ -916,7 +1001,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_multiple_deps() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {
@@ -965,7 +1050,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_nested_deps() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {
@@ -1011,7 +1096,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_circular() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {
@@ -1054,7 +1139,7 @@ mod tests {
     fn test_resolve_dependencies_task_not_found() {
         let config = Config {
             default: None,
-            tasks: HashMap::new(),
+            tasks: IndexMap::new(),
         };
 
         let result = resolve_dependencies(&config, &["nonexistent".to_string()]);
@@ -1069,7 +1154,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_dep_not_found() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {
@@ -1093,7 +1178,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_multiple_targets() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {
@@ -1143,7 +1228,7 @@ mod tests {
 
     #[test]
     fn test_resolve_dependencies_diamond_graph() {
-        let mut tasks = HashMap::new();
+        let mut tasks = IndexMap::new();
         tasks.insert(
             "task1".to_string(),
             crate::config::TaskConfiguration {

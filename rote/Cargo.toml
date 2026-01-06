@@ -21,6 +21,7 @@ nix = { version = "0.28", features = ["signal"] }
 tokio = { version = "1.37", features = ["macros", "rt-multi-thread", "process", "io-util", "time", "sync"] }
 ratatui = "0.26"
 ropey = "1.6"
+indexmap = { version = "2.7", features = ["serde"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_yaml = "0.9.34"
 shell-words = "1.1.1"
