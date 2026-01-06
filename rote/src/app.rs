@@ -21,18 +21,13 @@ use crate::{
     task_manager::{TaskManager, resolve_dependencies},
     ui::{ProcessStatus, UiEvent},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
-
 fn format_timestamp(timestamps: bool) -> Option<String> {
     if timestamps {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let hours = (now % 86400) / 3600;
-        let minutes = (now % 3600) / 60;
-        let seconds = now % 60;
-        Some(format!("{hours:02}:{minutes:02}:{seconds:02}"))
+        Some(
+            chrono::Local::now()
+                .format("[%Y-%m-%d %H:%M:%S]")
+                .to_string(),
+        )
     } else {
         None
     }
@@ -136,7 +131,7 @@ pub async fn run_with_input(
                 cwd,
                 show_stdout,
                 show_stderr,
-                config.timestamps,
+                task_config.timestamps,
             ));
         }
     }
@@ -812,7 +807,6 @@ mod tests {
         let config = Config {
             default: None,
             tasks: HashMap::new(),
-            timestamps: false,
         };
         let result = resolve_dependencies(&config, &[]).unwrap();
         assert!(result.is_empty());
@@ -829,13 +823,13 @@ mod tests {
                 display: None,
                 require: vec![],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
@@ -853,6 +847,7 @@ mod tests {
                 display: None,
                 require: vec!["dep1".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -863,13 +858,13 @@ mod tests {
                 display: None,
                 require: vec![],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
@@ -887,6 +882,7 @@ mod tests {
                 display: None,
                 require: vec!["dep1".to_string(), "dep2".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -897,6 +893,7 @@ mod tests {
                 display: None,
                 require: vec![],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -907,13 +904,13 @@ mod tests {
                 display: None,
                 require: vec![],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
@@ -934,6 +931,7 @@ mod tests {
                 display: None,
                 require: vec!["dep1".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -944,6 +942,7 @@ mod tests {
                 display: None,
                 require: vec!["dep2".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -954,13 +953,13 @@ mod tests {
                 display: None,
                 require: vec![],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();
@@ -978,6 +977,7 @@ mod tests {
                 display: None,
                 require: vec!["task2".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -988,13 +988,13 @@ mod tests {
                 display: None,
                 require: vec!["task1".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["task1".to_string()]);
@@ -1012,7 +1012,6 @@ mod tests {
         let config = Config {
             default: None,
             tasks: HashMap::new(),
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["nonexistent".to_string()]);
@@ -1036,13 +1035,13 @@ mod tests {
                 display: None,
                 require: vec!["nonexistent".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["task1".to_string()]);
@@ -1060,6 +1059,7 @@ mod tests {
                 display: None,
                 require: vec!["dep1".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -1070,6 +1070,7 @@ mod tests {
                 display: None,
                 require: vec!["dep1".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -1080,13 +1081,13 @@ mod tests {
                 display: None,
                 require: vec![],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result =
@@ -1108,6 +1109,7 @@ mod tests {
                 display: None,
                 require: vec!["dep1".to_string(), "dep2".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -1118,6 +1120,7 @@ mod tests {
                 display: None,
                 require: vec!["base".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -1128,6 +1131,7 @@ mod tests {
                 display: None,
                 require: vec!["base".to_string()],
                 autorestart: false,
+                timestamps: false,
             },
         );
         tasks.insert(
@@ -1138,13 +1142,13 @@ mod tests {
                 display: None,
                 require: vec![],
                 autorestart: false,
+                timestamps: false,
             },
         );
 
         let config = Config {
             default: None,
             tasks,
-            timestamps: false,
         };
 
         let result = resolve_dependencies(&config, &["task1".to_string()]).unwrap();

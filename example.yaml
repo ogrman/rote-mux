@@ -2,6 +2,7 @@ default: ping-demo
 tasks:
   google-ping:
     run: ping google.com
+    timestamps: true
   cloudflare-ping:
     run: ping 1.1.1.1
   github-ping:

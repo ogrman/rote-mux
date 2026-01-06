@@ -7,9 +7,6 @@ pub struct Config {
     pub default: Option<String>,
     /// A mapping of task names to their configurations.
     pub tasks: HashMap<String, TaskConfiguration>,
-    /// Whether to show timestamps for log messages.
-    #[serde(default)]
-    pub timestamps: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -31,6 +28,9 @@ pub struct TaskConfiguration {
     /// Whether to automatically restart the task when it exits.
     #[serde(default)]
     pub autorestart: bool,
+    /// Whether to show timestamps for log messages.
+    #[serde(default)]
+    pub timestamps: bool,
 }
 
 /// Represents the action to be performed for a task.

@@ -66,6 +66,7 @@ Each task can have the following properties:
 - `display` (optional): List of streams to display (["stdout"], ["stderr"], or both by default)
 - `require` (optional): List of tasks that must be started before this one
 - `autorestart` (optional): If true, automatically restart the task when it exits (default: false)
+- `timestamps` (optional): If true, show timestamps for log messages (default: false)
 
 ### Actions: `run` vs `ensure`
 

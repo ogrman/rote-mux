@@ -113,6 +113,7 @@ async fn test_ensure_dependency_blocks_until_complete() {
             display: None,
             require: vec![],
             autorestart: false,
+            timestamps: false,
         },
     );
 
@@ -127,13 +128,13 @@ async fn test_ensure_dependency_blocks_until_complete() {
             display: None,
             require: vec!["setup".to_string()],
             autorestart: false,
+            timestamps: false,
         },
     );
 
     let config = Config {
         default: Some("main".to_string()),
         tasks,
-        timestamps: false,
     };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
