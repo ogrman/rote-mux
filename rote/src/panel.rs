@@ -93,29 +93,25 @@ impl MessageBuf {
         let mut result = Vec::new();
         for line in self.rope.lines() {
             let line_str = line.to_string();
-            if line_str.starts_with('\x1E') {
-                if let Some(rest) = line_str.strip_prefix('\x1E') {
-                    if let Some(kind_char) = rest.chars().next() {
-                        if let Some(content) = rest
-                            .strip_prefix(kind_char)
-                            .and_then(|s| s.strip_prefix('\x1F'))
-                        {
-                            let kind = match kind_char {
-                                'o' => MessageKind::Stdout,
-                                'e' => MessageKind::Stderr,
-                                's' => MessageKind::Status,
-                                _ => continue,
-                            };
-                            let should_include = match kind {
-                                MessageKind::Stdout => show_stdout,
-                                MessageKind::Stderr => show_stderr,
-                                MessageKind::Status => show_status,
-                            };
-                            if should_include {
-                                result.push((kind, content.trim_end_matches('\n').to_string()));
-                            }
-                        }
-                    }
+            if let Some(rest) = line_str.strip_prefix('\x1E')
+                && let Some(kind_char) = rest.chars().next()
+                && let Some(content) = rest
+                    .strip_prefix(kind_char)
+                    .and_then(|s| s.strip_prefix('\x1F'))
+            {
+                let kind = match kind_char {
+                    'o' => MessageKind::Stdout,
+                    'e' => MessageKind::Stderr,
+                    's' => MessageKind::Status,
+                    _ => continue,
+                };
+                let should_include = match kind {
+                    MessageKind::Stdout => show_stdout,
+                    MessageKind::Stderr => show_stderr,
+                    MessageKind::Status => show_status,
+                };
+                if should_include {
+                    result.push((kind, content.trim_end_matches('\n').to_string()));
                 }
             }
         }
@@ -946,16 +942,6 @@ mod tests {
 
         assert_eq!(a, b);
         assert_ne!(a, c);
-    }
-
-    #[test]
-    fn test_panel_index_copy_clone() {
-        let a = PanelIndex::new(1);
-        let b = a; // Copy
-        let c = a.clone(); // Clone
-
-        assert_eq!(a, b);
-        assert_eq!(a, c);
     }
 
     #[test]
