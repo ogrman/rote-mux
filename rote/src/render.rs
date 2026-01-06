@@ -373,6 +373,7 @@ pub fn draw(
             "s    status",
             "q    quit",
             "r    restart",
+            "t    stop",
             "o    toggle stdout",
             "e    toggle stderr",
         ]

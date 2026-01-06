@@ -207,6 +207,7 @@ pub async fn run_with_input(
                             let ev = match k.code {
                                 KeyCode::Char('q') => UiEvent::Exit,
                                 KeyCode::Char('r') => UiEvent::Restart,
+                                KeyCode::Char('t') => UiEvent::Stop,
                                 KeyCode::Char('o') => UiEvent::ToggleStdout,
                                 KeyCode::Char('e') => UiEvent::ToggleStderr,
                                 KeyCode::Char('s') => UiEvent::SwitchToStatus,
@@ -586,6 +587,48 @@ pub async fn run_with_input(
                     }
                 }
                 redraw = true;
+            }
+
+            UiEvent::Stop => {
+                if let Some(proc) = procs[*active].take() {
+                    // Get exit status Arc before awaiting (which partially moves proc)
+                    let exit_status_arc = proc.exit_status_arc();
+
+                    proc.terminate().await;
+                    // Wait for the process to fully exit and all I/O to drain
+                    let _ = proc.wait_task.await;
+                    let _ = proc.stdout_task.await;
+                    let _ = proc.stderr_task.await;
+
+                    // Add exit message
+                    let exit_status = exit_status_arc.lock().unwrap();
+                    if let Some(Ok(status)) = exit_status.as_ref() {
+                        use std::os::unix::process::ExitStatusExt;
+                        let exit_code = status.code().or_else(|| status.signal().map(|s| 128 + s));
+                        let msg = format!(
+                            "[stopped: {}]",
+                            exit_code
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "unknown".into())
+                        );
+                        let timestamp = format_timestamp(panels[*active].timestamps);
+                        panels[*active].messages.push(
+                            MessageKind::Status,
+                            &msg,
+                            timestamp.as_deref(),
+                        );
+                    }
+
+                    // Update scroll if following
+                    let was_following = panels[*active].follow;
+                    let max_len = panels[*active].visible_len();
+                    if max_len > 0 && was_following {
+                        panels[*active].scroll = max_len - 1;
+                    }
+                    panels[*active].follow = was_following;
+
+                    redraw = true;
+                }
             }
 
             UiEvent::Exit => {

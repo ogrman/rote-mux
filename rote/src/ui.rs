@@ -31,6 +31,7 @@ pub enum UiEvent {
     ToggleStdout,
     ToggleStderr,
     Restart,
+    Stop,
     Exit,
     /// Navigate to the previous panel (or status if at first panel)
     PrevPanel,
