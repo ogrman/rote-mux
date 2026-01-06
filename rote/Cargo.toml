@@ -1,6 +1,6 @@
 [package]
 name = "rote-mux"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A terminal multiplexer for monitoring and managing multiple processes"
 license = "MIT"
