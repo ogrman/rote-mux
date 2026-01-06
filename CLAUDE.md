@@ -19,6 +19,7 @@ cargo clippy                   # Lint
 
 Always run `cargo test` after making changes. Fix any failing tests.
 Always run `cargo fmt` after all tests pass.
+Always run `cargo clippy` before committing. Fix any warnings.
 Whenever the config format changes, update `example.yaml` and `README.md`.
 Integration test scripts should have names starting with the test name.
 The only allowed languages are Rust for application code, and bash for scripts used in tests.
