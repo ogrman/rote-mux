@@ -40,7 +40,14 @@ The binary will be at `target/release/rote`.
 
 ## Quick Start
 
-Create a `rote.yaml` file:
+Generate an example configuration file and run it:
+
+```bash
+rote --generate-example > rote.yaml
+rote
+```
+
+Or create your own `rote.yaml` file:
 
 ```yaml
 default: ping-demo
