@@ -547,7 +547,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rote"
+name = "rote-mux"
 version = "0.1.0"
 dependencies = [
  "anyhow",

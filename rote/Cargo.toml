@@ -1,7 +1,16 @@
 [package]
-name = "rote"
+name = "rote-mux"
 version = "0.1.0"
 edition = "2024"
+description = "A terminal multiplexer for monitoring and managing multiple processes"
+license = "MIT"
+repository = "https://github.com/ogrman/rote-mux"
+keywords = ["terminal", "multiplexer", "process", "tui"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "rote"
+path = "src/bin/rote.rs"
 
 [dependencies]
 anyhow = "1.0.100"

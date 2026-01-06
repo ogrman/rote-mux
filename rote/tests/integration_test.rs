@@ -1,5 +1,5 @@
-use rote::panel::PanelIndex;
-use rote::{Config, UiEvent};
+use rote_mux::panel::PanelIndex;
+use rote_mux::{Config, UiEvent};
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::time::timeout;
@@ -17,7 +17,7 @@ async fn test_example_yaml_quit() {
 
     // Spawn app with external event receiver
     let app_task = tokio::spawn(async move {
-        rote::run_with_input(
+        rote_mux::run_with_input(
             config,
             vec![],
             std::path::PathBuf::from("/home/lars/src/rote/rote/tests/data"),
@@ -60,7 +60,7 @@ async fn test_can_switch_to_run_task_panel() {
 
     // Spawn app with external event receiver
     let app_task = tokio::spawn(async move {
-        rote::run_with_input(
+        rote_mux::run_with_input(
             config,
             vec![],
             std::path::PathBuf::from("/home/lars/src/rote/rote/tests/data"),
@@ -97,7 +97,7 @@ async fn test_can_switch_to_run_task_panel() {
 /// Test that a task with an Ensure dependency waits for the Ensure task to complete.
 #[tokio::test]
 async fn test_ensure_dependency_blocks_until_complete() {
-    use rote::config::{CommandValue, TaskAction, TaskConfiguration};
+    use rote_mux::config::{CommandValue, TaskAction, TaskConfiguration};
     use std::borrow::Cow;
 
     let mut tasks = HashMap::new();
@@ -140,7 +140,7 @@ async fn test_ensure_dependency_blocks_until_complete() {
     let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
 
     let app_task = tokio::spawn(async move {
-        rote::run_with_input(config, vec![], std::path::PathBuf::from("."), Some(rx)).await
+        rote_mux::run_with_input(config, vec![], std::path::PathBuf::from("."), Some(rx)).await
     });
 
     // Wait for tasks to start
@@ -166,7 +166,7 @@ async fn test_scroll_events() {
     let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
 
     let app_task = tokio::spawn(async move {
-        rote::run_with_input(
+        rote_mux::run_with_input(
             config,
             vec![],
             std::path::PathBuf::from("/home/lars/src/rote/rote/tests/data"),
@@ -208,7 +208,7 @@ async fn test_toggle_stream_visibility() {
     let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
 
     let app_task = tokio::spawn(async move {
-        rote::run_with_input(
+        rote_mux::run_with_input(
             config,
             vec![],
             std::path::PathBuf::from("/home/lars/src/rote/rote/tests/data"),
@@ -256,7 +256,7 @@ async fn test_switch_status_and_panel_views() {
     let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
 
     let app_task = tokio::spawn(async move {
-        rote::run_with_input(
+        rote_mux::run_with_input(
             config,
             vec![],
             std::path::PathBuf::from("/home/lars/src/rote/rote/tests/data"),

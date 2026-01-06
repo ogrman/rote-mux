@@ -3,7 +3,7 @@ use clap::Parser;
 use std::fs;
 use std::path::PathBuf;
 
-use rote::Config;
+use rote_mux::Config;
 
 const EXAMPLE_YAML: &str = include_str!("../../tests/data/example.yaml");
 
@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     let config: Config = serde_yaml::from_str(&yaml_str).context("Parsing the config file")?;
 
-    rote::run(config, args.services, yaml_dir).await?;
+    rote_mux::run(config, args.services, yaml_dir).await?;
 
     Ok(())
 }

@@ -2,9 +2,9 @@ use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
 use tokio::time::timeout;
 
-use rote::panel::{MessageKind, Panel, PanelIndex, StreamKind};
-use rote::process::TaskInstance;
-use rote::ui::UiEvent;
+use rote_mux::panel::{MessageKind, Panel, PanelIndex, StreamKind};
+use rote_mux::process::TaskInstance;
+use rote_mux::ui::UiEvent;
 
 #[tokio::test]
 async fn test_panel_stderr_buffer() {
