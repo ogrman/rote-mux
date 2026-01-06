@@ -90,11 +90,11 @@ impl TaskInstance {
             // First try to get the exit code directly
             if let Some(code) = s.code() {
                 Some(code)
-            } else if let Some(signal) = s.signal() {
-                // Process was killed by signal - use standard 128+signal convention
-                Some(128 + signal)
             } else {
-                None
+                s.signal().map(|s| {
+                    // Process was killed by signal - use standard 128+signal convention
+                    128 + s
+                })
             }
         });
         let is_ok = result.is_ok();

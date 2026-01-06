@@ -80,7 +80,13 @@ These are mutually exclusive - a task can only have one or the other.
 default: dev
 tasks:
   # One-time setup
-  install:
+  init-config:
+    cwd: backend
+    ensure: bash -c '[ -f .env ] || cp env_template .env'
+
+  # Install dependencies:
+  frontend-install:
+    cwd: frontend
     ensure: npm install
 
   # Database
@@ -90,19 +96,19 @@ tasks:
 
   # Run migrations after DB is ready
   migrate:
-    ensure: alembic upgrade head
+    ensure: run-migrations.sh
     require: [postgres, install]
 
   # Backend server
   api:
     cwd: backend
-    run: npm run start
-    require: [migrate]
+    run: cargo run --bin api
+    require: [migrate, init-config]
 
   # Frontend dev server
   web:
     cwd: frontend
-    run: npm run dev
+    run: npm run http-server
     require: [install]
 
   # Development target
@@ -134,6 +140,7 @@ When running, the following keyboard shortcuts are available:
 - `e`: Toggle stderr visibility for the active panel
 - `s`: Switch to status panel showing all tasks
 - `1-9`: Switch to panel 1-9
+- `←/→`: Navigate to previous/next panel
 - `↑/↓`: Scroll up/down one line
 - `PgUp/PgDn`: Scroll up/down 20 lines
 
@@ -229,10 +236,3 @@ cargo fmt
 # Lint
 cargo clippy
 ```
-
-## Use Cases
-
-- Development Environments: Manage multiple tasks during local development
-- Task Orchestration: Manage microservices during development
-- System Administration: Monitor multiple long-running tasks
-- Testing: Run integration tests with multiple task dependencies

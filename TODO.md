@@ -1,23 +1,23 @@
 # TODO
 
-## 1. Rename "service" to "task"
+## 1. ~~Rename "service" to "task"~~ ✓
 
 Update terminology throughout the codebase:
-- [ ] Update config format to use "tasks" instead of "services"
-- [ ] Update CLAUDE.md documentation
-- [ ] Update README.md documentation
-- [ ] Update example.yaml
-- [ ] Rename code types and variables (e.g., `ServiceInstance` → `TaskInstance`, `ServiceManager` → `TaskManager`)
-- [ ] Update error messages and UI text
+- [x] Update config format to use "tasks" instead of "services"
+- [x] Update CLAUDE.md documentation
+- [x] Update README.md documentation
+- [x] Update example.yaml
+- [x] Rename code types and variables (e.g., `ServiceInstance` → `TaskInstance`, `ServiceManager` → `TaskManager`)
+- [x] Update error messages and UI text
 
-## 2. Change action type semantics
+## 2. ~~Change action type semantics~~ ✓
 
 Rename action types in the config format:
-- [ ] Change "run" to "ensure" (one-time commands that block dependents until complete)
-- [ ] Change "start" to "run" (long-running processes)
-- [ ] Update config parsing in config.rs
-- [ ] Update documentation (CLAUDE.md, README.md, example.yaml)
-- [ ] Update any code references to these action types
+- [x] Change "run" to "ensure" (one-time commands that block dependents until complete)
+- [x] Change "start" to "run" (long-running processes)
+- [x] Update config parsing in config.rs
+- [x] Update documentation (CLAUDE.md, README.md, example.yaml)
+- [x] Update any code references to these action types
 
 ## 3. Add new "start"/"stop" service type
 
