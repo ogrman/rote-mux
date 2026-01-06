@@ -219,21 +219,29 @@ Test coverage includes:
 ### Project Structure
 
 ```
-rote/
-├── src/
-│   ├── app.rs       # Main TUI application loop
-│   ├── config.rs    # YAML configuration parsing
-│   ├── panel.rs     # Panel and output buffer management
-│   ├── process.rs   # Process spawning and management
-│   ├── signals.rs   # Signal handling and escalation
-│   ├── ui.rs        # UI event definitions
-│   ├── render.rs    # UI rendering
-│   └── bin/
-│       └── rote.rs  # CLI entry point
-└── tests/
-    ├── process_tests.rs  # Process management tests
-    ├── integration_test.rs  # Integration tests
-    └── data/             # Test scripts and fixtures
+.
+├── Cargo.toml           # Workspace manifest
+├── example.yaml         # Example configuration
+├── scripts/             # CI/build scripts
+├── rote/
+│   ├── Cargo.toml       # Package manifest
+│   ├── src/
+│   │   ├── lib.rs           # Library root
+│   │   ├── app.rs           # Main TUI application loop
+│   │   ├── config.rs        # YAML configuration parsing
+│   │   ├── error.rs         # Error types
+│   │   ├── panel.rs         # Panel and output buffer management
+│   │   ├── process.rs       # Process spawning and management
+│   │   ├── render.rs        # UI rendering
+│   │   ├── signals.rs       # Signal handling utilities
+│   │   ├── task_manager.rs  # Task lifecycle and dependency resolution
+│   │   ├── ui.rs            # UI event definitions
+│   │   └── bin/
+│   │       └── rote.rs      # CLI entry point
+│   └── tests/
+│       ├── integration_test.rs  # Integration tests
+│       ├── process_tests.rs     # Process management tests
+│       └── data/                # Test configs and scripts
 ```
 
 ### Building
