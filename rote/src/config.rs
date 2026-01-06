@@ -1,12 +1,13 @@
+use indexmap::IndexMap;
 use serde::Deserialize;
-use std::{borrow::Cow, collections::HashMap};
+use std::borrow::Cow;
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
     /// The default task to run when none is specified.
     pub default: Option<String>,
-    /// A mapping of task names to their configurations.
-    pub tasks: HashMap<String, TaskConfiguration>,
+    /// A mapping of task names to their configurations (preserves YAML order).
+    pub tasks: IndexMap<String, TaskConfiguration>,
 }
 
 #[derive(Debug, Deserialize)]
