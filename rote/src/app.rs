@@ -785,6 +785,91 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
 
+    use crate::config::{CommandValue, TaskConfiguration};
+    use std::borrow::Cow;
+
+    /// Helper to extract panel names from a config in the order they would be created.
+    /// This mirrors the logic in run_with_input for creating panels.
+    fn get_panel_order(config: &Config) -> Vec<String> {
+        config
+            .tasks
+            .iter()
+            .filter(|(_, cfg)| {
+                matches!(
+                    cfg.action,
+                    Some(TaskAction::Run { .. }) | Some(TaskAction::Ensure { .. })
+                )
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    #[test]
+    fn test_panel_order_matches_yaml_order() {
+        let mut tasks = IndexMap::new();
+        tasks.insert(
+            "third".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Run {
+                    command: CommandValue::String(Cow::Borrowed("echo third")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec![],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+        tasks.insert(
+            "first".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Run {
+                    command: CommandValue::String(Cow::Borrowed("echo first")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec![],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+        tasks.insert(
+            "second".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Ensure {
+                    command: CommandValue::String(Cow::Borrowed("echo second")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec![],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+        // Task without action should be excluded from panels
+        tasks.insert(
+            "no-action".to_string(),
+            TaskConfiguration {
+                action: None,
+                cwd: None,
+                display: None,
+                require: vec!["first".to_string()],
+                autorestart: false,
+                timestamps: false,
+            },
+        );
+
+        let config = Config {
+            default: None,
+            tasks,
+        };
+
+        let panel_order = get_panel_order(&config);
+        // Panels should be in insertion order (third, first, second), not alphabetical
+        // The "no-action" task should be excluded since it has no run/ensure action
+        assert_eq!(panel_order, vec!["third", "first", "second"]);
+    }
+
     #[test]
     fn test_visible_len_empty_panel() {
         let panel = Panel::new(
