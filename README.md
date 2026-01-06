@@ -18,15 +18,25 @@ A terminal multiplexer for monitoring and managing multiple processes together.
 
 ## Installation
 
+### From crates.io
+
 ```bash
-cargo install --path rote
+cargo install rote-mux
 ```
 
-Or build from source:
+### From GitHub releases
+
+Download a pre-built binary from the [releases page](https://github.com/ogrman/rote-mux/releases).
+
+### From source
 
 ```bash
+git clone https://github.com/ogrman/rote-mux.git
+cd rote-mux
 cargo build --release
 ```
+
+The binary will be at `target/release/rote`.
 
 ## Quick Start
 
