@@ -24,6 +24,10 @@ Whenever the config format changes, update `example.yaml` and `README.md`.
 Integration test scripts should have names starting with the test name.
 The only allowed languages are Rust for application code, and bash for scripts used in tests.
 
+## Releases
+
+A new release is created by bumping the version in `Cargo.toml` in a pull request.
+
 ## Project Overview
 
 Rote is a terminal multiplexer for monitoring and managing multiple processes. Users define tasks in YAML with dependencies, and Rote starts them in topological order with a TUI for monitoring output.
