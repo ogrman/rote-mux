@@ -1,7 +1,8 @@
 use anyhow::Context as _;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use rote_mux::Config;
 
@@ -10,6 +11,20 @@ const EXAMPLE_YAML: &str = include_str!("../../tests/data/example.yaml");
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Run rote with a configuration file
+    Run(RunArgs),
+    /// Run utility tools
+    Tool(ToolArgs),
+}
+
+#[derive(Parser, Debug)]
+struct RunArgs {
     /// The path to the configuration file. If omitted will look for `rote.yaml`
     /// in the current directory.
     #[arg(short, long, value_name = "FILE")]
@@ -22,6 +37,44 @@ struct Args {
     /// Print an example configuration file to stdout and exit.
     #[arg(long)]
     generate_example: bool,
+}
+
+#[derive(Parser, Debug)]
+struct ToolArgs {
+    /// Wait and retry until the tool succeeds (exits with code 0)
+    #[arg(long)]
+    wait: bool,
+    /// Interval between retries when --wait is specified (e.g., "1s", "500ms")
+    #[arg(long, default_value = "1s", value_parser = parse_duration)]
+    interval: Duration,
+    #[command(subcommand)]
+    tool: Tool,
+}
+
+#[derive(Subcommand, Debug)]
+enum Tool {
+    /// Check if a port is open on localhost
+    IsPortOpen {
+        /// The port number to check
+        port: u16,
+    },
+}
+
+fn parse_duration(s: &str) -> Result<Duration, String> {
+    let s = s.trim();
+    if let Some(ms) = s.strip_suffix("ms") {
+        ms.parse::<u64>()
+            .map(Duration::from_millis)
+            .map_err(|e| format!("invalid milliseconds: {e}"))
+    } else if let Some(secs) = s.strip_suffix('s') {
+        secs.parse::<u64>()
+            .map(Duration::from_secs)
+            .map_err(|e| format!("invalid seconds: {e}"))
+    } else {
+        s.parse::<u64>()
+            .map(Duration::from_secs)
+            .map_err(|_| "expected duration like '1s' or '500ms'".to_string())
+    }
 }
 
 #[tokio::main]
@@ -38,6 +91,22 @@ async fn main() {
 async fn run() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    match args.command {
+        Some(Command::Tool(tool_args)) => run_tool(tool_args).await,
+        Some(Command::Run(run_args)) => run_main(run_args).await,
+        None => {
+            // Default behavior: run with default args (backwards compatible)
+            run_main(RunArgs {
+                config: None,
+                services: vec![],
+                generate_example: false,
+            })
+            .await
+        }
+    }
+}
+
+async fn run_main(args: RunArgs) -> anyhow::Result<()> {
     if args.generate_example {
         println!("{EXAMPLE_YAML}");
         return Ok(());
@@ -63,4 +132,25 @@ async fn run() -> anyhow::Result<()> {
     rote_mux::run(config, args.services, yaml_dir).await?;
 
     Ok(())
+}
+
+async fn run_tool(args: ToolArgs) -> anyhow::Result<()> {
+    use rote_mux::tools;
+
+    loop {
+        let result = match &args.tool {
+            Tool::IsPortOpen { port } => tools::is_port_open(*port).await,
+        };
+
+        match result {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                if args.wait {
+                    tokio::time::sleep(args.interval).await;
+                } else {
+                    return Err(e);
+                }
+            }
+        }
+    }
 }
