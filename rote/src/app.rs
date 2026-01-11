@@ -222,6 +222,10 @@ pub async fn run_with_input(
                 .entry_indices
                 .insert(task_name.clone(), usize::MAX);
             status_panel.update_dependencies(task_name.clone(), task_config.require.clone());
+            // Initialize healthcheck_passed to Some(false) if task has a healthcheck
+            if task_config.healthcheck.is_some() {
+                status_panel.set_has_healthcheck(task_name);
+            }
         }
     }
 

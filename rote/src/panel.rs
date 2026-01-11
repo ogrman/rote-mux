@@ -335,7 +335,11 @@ impl StatusPanel {
                     (
                         Some(crate::config::TaskAction::Run { .. }),
                         crate::ui::ProcessStatus::Running,
-                    ) => true,
+                    ) => {
+                        // If healthcheck is configured but not yet passed, not healthy
+                        // If no healthcheck or healthcheck passed, healthy
+                        entry.healthcheck_passed != Some(false)
+                    }
                     _ => false,
                 };
 
