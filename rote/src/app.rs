@@ -797,6 +797,7 @@ pub async fn run_with_input(
                                 if let Some(task_config) = config.tasks.get(&task_name)
                                     && let Some(healthcheck) = &task_config.healthcheck
                                 {
+                                    status_panel.set_has_healthcheck(&task_name);
                                     let hc_task = spawn_healthcheck(
                                         task_name.clone(),
                                         healthcheck.clone(),
@@ -827,6 +828,7 @@ pub async fn run_with_input(
             UiEvent::HealthcheckPassed { task_name } => {
                 // Mark the task as healthy
                 task_manager.mark_healthy(&task_name);
+                status_panel.update_healthcheck_passed(&task_name);
 
                 // Log the healthcheck success
                 if let Some(panel_idx) = task_manager.get_panel_index(&task_name) {

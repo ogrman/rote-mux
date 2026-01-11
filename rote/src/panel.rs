@@ -241,6 +241,8 @@ pub struct StatusEntry {
     pub exit_code: Option<i32>,
     pub action_type: Option<crate::config::TaskAction>,
     pub dependencies: Vec<String>,
+    /// None = no healthcheck configured, Some(false) = pending, Some(true) = passed
+    pub healthcheck_passed: Option<bool>,
 }
 
 impl StatusPanel {
@@ -260,6 +262,7 @@ impl StatusPanel {
                     exit_code: None,
                     action_type: None,
                     dependencies: Vec::new(),
+                    healthcheck_passed: None,
                 });
                 self.entries.last_mut().unwrap()
             }
@@ -291,6 +294,24 @@ impl StatusPanel {
         if let Some(entry) = self.entries.iter_mut().find(|e| e.task_name == task_name) {
             entry.dependencies = dependencies;
         }
+    }
+
+    pub fn set_has_healthcheck(&mut self, task_name: &str) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.task_name == task_name) {
+            // Initialize to Some(false) meaning healthcheck configured but not yet passed
+            entry.healthcheck_passed = Some(false);
+        }
+    }
+
+    pub fn update_healthcheck_passed(&mut self, task_name: &str) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.task_name == task_name) {
+            entry.healthcheck_passed = Some(true);
+        }
+    }
+
+    /// Get the status entry for a task by name.
+    pub fn get_entry(&self, task_name: &str) -> Option<&StatusEntry> {
+        self.entries.iter().find(|e| e.task_name == task_name)
     }
 
     pub fn get_health_status(&self) -> (usize, usize, bool) {
@@ -634,6 +655,7 @@ mod tests {
             exit_code: None,
             action_type: None,
             dependencies: Vec::new(),
+            healthcheck_passed: None,
         };
         let cloned = entry.clone();
         assert_eq!(entry.task_name, cloned.task_name);

@@ -9,10 +9,25 @@ use rote_mux::Config;
 const EXAMPLE_YAML: &str = include_str!("../../tests/data/example.yaml");
 
 #[derive(Parser, Debug)]
-#[command(author, version, about)]
+#[command(author, version, about, args_conflicts_with_subcommands = true)]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
+
+    /// The path to the configuration file. If omitted will look for `rote.yaml`
+    /// in the current directory.
+    #[arg(short, long, value_name = "FILE")]
+    config: Option<String>,
+
+    /// The services to run. If omitted, the default service from the config
+    /// file will be run. If the default service is not specified in the config,
+    /// no services will be run.
+    #[arg(value_name = "SERVICE", required = false)]
+    services: Vec<String>,
+
+    /// Print an example configuration file to stdout and exit.
+    #[arg(long)]
+    generate_example: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -107,11 +122,11 @@ async fn run() -> anyhow::Result<()> {
         Some(Command::Tool(tool_args)) => run_tool(tool_args).await,
         Some(Command::Run(run_args)) => run_main(run_args).await,
         None => {
-            // Default behavior: run with default args (backwards compatible)
+            // Default behavior: use top-level args (backwards compatible)
             run_main(RunArgs {
-                config: None,
-                services: vec![],
-                generate_example: false,
+                config: args.config,
+                services: args.services,
+                generate_example: args.generate_example,
             })
             .await
         }
