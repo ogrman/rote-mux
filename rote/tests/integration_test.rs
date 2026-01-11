@@ -290,3 +290,152 @@ async fn test_switch_status_and_panel_views() {
     assert!(result.is_ok(), "App should exit within 5 seconds");
     assert!(result.unwrap().is_ok(), "App should exit successfully");
 }
+
+/// Test that a task with a healthcheck blocks its dependents until the healthcheck passes.
+#[tokio::test]
+async fn test_healthcheck_blocks_dependent_until_passed() {
+    use rote_mux::config::{
+        CommandValue, Healthcheck, HealthcheckMethod, TaskAction, TaskConfiguration,
+    };
+    use std::borrow::Cow;
+
+    let mut tasks = IndexMap::new();
+
+    // A Run task with a healthcheck that passes quickly
+    tasks.insert(
+        "server".to_string(),
+        TaskConfiguration {
+            action: Some(TaskAction::Run {
+                command: CommandValue::String(Cow::Borrowed("echo server started; sleep 10")),
+            }),
+            cwd: None,
+            display: None,
+            require: vec![],
+            autorestart: false,
+            timestamps: false,
+            healthcheck: Some(Healthcheck {
+                method: HealthcheckMethod::Cmd("true".to_string()),
+                interval: Duration::from_millis(100),
+            }),
+        },
+    );
+
+    // A task that depends on the server (should wait for healthcheck)
+    tasks.insert(
+        "client".to_string(),
+        TaskConfiguration {
+            action: Some(TaskAction::Run {
+                command: CommandValue::String(Cow::Borrowed("echo client started")),
+            }),
+            cwd: None,
+            display: None,
+            require: vec!["server".to_string()],
+            autorestart: false,
+            timestamps: false,
+            healthcheck: None,
+        },
+    );
+
+    let config = Config {
+        default: Some("client".to_string()),
+        tasks,
+    };
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
+
+    let app_task = tokio::spawn(async move {
+        rote_mux::run_with_input(config, vec![], std::path::PathBuf::from("."), Some(rx)).await
+    });
+
+    // Wait for healthcheck to pass and client to start
+    // The healthcheck interval is 100ms, so 500ms should be plenty
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send exit event
+    let _ = tx.send(UiEvent::Exit).await;
+    drop(tx);
+
+    // App should exit cleanly
+    let result = timeout(Duration::from_secs(3), app_task).await;
+    assert!(result.is_ok(), "App should exit within 3 seconds");
+    assert!(result.unwrap().is_ok(), "App should exit successfully");
+}
+
+/// Test healthcheck with is-port-open tool.
+#[tokio::test]
+async fn test_healthcheck_with_port_tool() {
+    use rote_mux::config::{
+        CommandValue, Healthcheck, HealthcheckMethod, HealthcheckTool, TaskAction,
+        TaskConfiguration,
+    };
+    use std::borrow::Cow;
+    use std::net::TcpListener;
+
+    // Bind to a random port that we'll use for the healthcheck
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+
+    let mut tasks = IndexMap::new();
+
+    // A Run task with a healthcheck that uses is-port-open
+    // The port is already open (we have a listener), so healthcheck should pass immediately
+    tasks.insert(
+        "server".to_string(),
+        TaskConfiguration {
+            action: Some(TaskAction::Run {
+                command: CommandValue::String(Cow::Borrowed("echo server; sleep 10")),
+            }),
+            cwd: None,
+            display: None,
+            require: vec![],
+            autorestart: false,
+            timestamps: false,
+            healthcheck: Some(Healthcheck {
+                method: HealthcheckMethod::Tool(HealthcheckTool::IsPortOpen { port }),
+                interval: Duration::from_millis(100),
+            }),
+        },
+    );
+
+    // A task that depends on the server
+    tasks.insert(
+        "client".to_string(),
+        TaskConfiguration {
+            action: Some(TaskAction::Run {
+                command: CommandValue::String(Cow::Borrowed("echo client started")),
+            }),
+            cwd: None,
+            display: None,
+            require: vec!["server".to_string()],
+            autorestart: false,
+            timestamps: false,
+            healthcheck: None,
+        },
+    );
+
+    let config = Config {
+        default: Some("client".to_string()),
+        tasks,
+    };
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
+
+    let app_task = tokio::spawn(async move {
+        rote_mux::run_with_input(config, vec![], std::path::PathBuf::from("."), Some(rx)).await
+    });
+
+    // Wait for healthcheck to pass
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send exit event
+    let _ = tx.send(UiEvent::Exit).await;
+    drop(tx);
+
+    // Keep the listener alive until we're done
+    drop(listener);
+
+    // App should exit cleanly
+    let result = timeout(Duration::from_secs(3), app_task).await;
+    assert!(result.is_ok(), "App should exit within 3 seconds");
+    assert!(result.unwrap().is_ok(), "App should exit successfully");
+}

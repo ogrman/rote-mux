@@ -583,4 +583,126 @@ tasks:
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid port"));
     }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_with_url() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get https://example.com/health
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGet {
+                url: "https://example.com/health".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_with_port() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get 8080
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGet {
+                url: "http://127.0.0.1:8080/".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_ok_with_url() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get-ok http://localhost:3000/ready
+      interval: 0.5
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGetOk {
+                url: "http://localhost:3000/ready".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_ok_with_port() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get-ok 9000
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGetOk {
+                url: "http://127.0.0.1:9000/".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_invalid_arg() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get not-a-port-or-url
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid port number or URL"));
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_missing_arg() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("requires exactly one argument"));
+    }
 }

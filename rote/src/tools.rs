@@ -43,6 +43,7 @@ pub async fn http_get_ok(url: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
     use std::net::TcpListener;
 
     #[tokio::test]
@@ -68,5 +69,123 @@ mod tests {
 
         let result = is_port_open(port).await;
         assert!(result.is_err());
+    }
+
+    /// Spawn a simple HTTP server that responds with the given status code.
+    fn spawn_http_server(status_code: u16) -> (u16, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        let handle = std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                // Read the request (we don't care about the content)
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf);
+
+                // Send HTTP response
+                let response = format!(
+                    "HTTP/1.1 {} OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    status_code
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        (port, handle)
+    }
+
+    #[tokio::test]
+    async fn test_http_get_success() {
+        let (port, handle) = spawn_http_server(200);
+        let url = format!("http://127.0.0.1:{}/", port);
+
+        let result = http_get(&url).await;
+        assert!(result.is_ok(), "http_get should succeed for any response");
+
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_http_get_success_with_non_2xx() {
+        // http_get should succeed even with 404 status
+        let (port, handle) = spawn_http_server(404);
+        let url = format!("http://127.0.0.1:{}/", port);
+
+        let result = http_get(&url).await;
+        assert!(
+            result.is_ok(),
+            "http_get should succeed even with non-2xx status"
+        );
+
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_http_get_connection_refused() {
+        // Get a port that's not listening
+        let port = {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let url = format!("http://127.0.0.1:{}/", port);
+
+        let result = http_get(&url).await;
+        assert!(
+            result.is_err(),
+            "http_get should fail when connection is refused"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_http_get_ok_success() {
+        let (port, handle) = spawn_http_server(200);
+        let url = format!("http://127.0.0.1:{}/", port);
+
+        let result = http_get_ok(&url).await;
+        assert!(result.is_ok(), "http_get_ok should succeed for 2xx status");
+
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_http_get_ok_fails_on_404() {
+        let (port, handle) = spawn_http_server(404);
+        let url = format!("http://127.0.0.1:{}/", port);
+
+        let result = http_get_ok(&url).await;
+        assert!(
+            result.is_err(),
+            "http_get_ok should fail for non-2xx status"
+        );
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("404"), "error should mention status code");
+
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_http_get_ok_fails_on_500() {
+        let (port, handle) = spawn_http_server(500);
+        let url = format!("http://127.0.0.1:{}/", port);
+
+        let result = http_get_ok(&url).await;
+        assert!(result.is_err(), "http_get_ok should fail for 5xx status");
+
+        handle.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_http_get_ok_connection_refused() {
+        let port = {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.local_addr().unwrap().port()
+        };
+        let url = format!("http://127.0.0.1:{}/", port);
+
+        let result = http_get_ok(&url).await;
+        assert!(
+            result.is_err(),
+            "http_get_ok should fail when connection is refused"
+        );
     }
 }
