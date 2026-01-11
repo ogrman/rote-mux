@@ -439,3 +439,83 @@ async fn test_healthcheck_with_port_tool() {
     assert!(result.is_ok(), "App should exit within 3 seconds");
     assert!(result.unwrap().is_ok(), "App should exit successfully");
 }
+
+/// Test healthcheck with is-port-open tool where port opens after a delay.
+/// This simulates the healthcheck-tool-demo scenario from example.yaml.
+#[tokio::test]
+async fn test_healthcheck_delayed_port() {
+    use rote_mux::config::{
+        CommandValue, Healthcheck, HealthcheckMethod, HealthcheckTool, TaskAction,
+        TaskConfiguration,
+    };
+    use std::borrow::Cow;
+    use std::net::TcpListener;
+
+    // Find an available port
+    let port = {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+    // Port is now closed
+    eprintln!("TEST: Using port {}", port);
+
+    let mut tasks = IndexMap::new();
+
+    // A Run task with a healthcheck that uses is-port-open
+    // The port is NOT open initially - it will be opened after a delay
+    // Note: Commands with shell metacharacters like ; need to use bash -c
+    tasks.insert(
+        "server".to_string(),
+        TaskConfiguration {
+            action: Some(TaskAction::Run {
+                command: CommandValue::String(Cow::Borrowed("sleep 10")),
+            }),
+            cwd: None,
+            display: None,
+            require: vec![],
+            autorestart: false,
+            timestamps: false,
+            healthcheck: Some(Healthcheck {
+                method: HealthcheckMethod::Tool(HealthcheckTool::IsPortOpen { port }),
+                interval: Duration::from_millis(100),
+            }),
+        },
+    );
+
+    let config = Config {
+        default: Some("server".to_string()),
+        tasks,
+    };
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<UiEvent>(100);
+
+    let app_task = tokio::spawn(async move {
+        rote_mux::run_with_input(config, vec![], std::path::PathBuf::from("."), Some(rx)).await
+    });
+
+    // Wait a bit for the task to start
+    eprintln!("TEST: Waiting 300ms before opening port");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // Open the port - the healthcheck should detect this
+    eprintln!("TEST: Opening port {}", port);
+    let _listener = TcpListener::bind(format!("127.0.0.1:{}", port)).unwrap();
+
+    // Verify port is open
+    let is_open = std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok();
+    eprintln!("TEST: Port {} is open: {}", port, is_open);
+
+    // Wait for healthcheck to pass
+    eprintln!("TEST: Waiting 500ms for healthcheck to pass");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send exit event
+    eprintln!("TEST: Sending Exit event");
+    let _ = tx.send(UiEvent::Exit).await;
+    drop(tx);
+
+    // App should exit cleanly
+    let result = timeout(Duration::from_secs(3), app_task).await;
+    assert!(result.is_ok(), "App should exit within 3 seconds");
+    assert!(result.unwrap().is_ok(), "App should exit successfully");
+}

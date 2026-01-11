@@ -842,11 +842,10 @@ pub async fn run_with_input(
                         "[healthcheck passed]",
                         timestamp.as_deref(),
                     );
-
-                    if panel_idx == active {
-                        redraw = true;
-                    }
                 }
+
+                // Always redraw - the status sidebar is always visible
+                redraw = true;
 
                 // Remove the healthcheck task (it has completed)
                 healthcheck_tasks.remove(&task_name);
