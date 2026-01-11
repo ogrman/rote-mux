@@ -39,6 +39,10 @@ pub enum UiEvent {
     NextPanel,
     /// Trigger starting the next pending task
     StartNextTask,
+    /// Healthcheck passed for a task
+    HealthcheckPassed {
+        task_name: String,
+    },
 }
 
 #[cfg(test)]

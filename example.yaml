@@ -15,5 +15,15 @@ tasks:
     autorestart: true
   setup-task:
     ensure: true
+  healthcheck-demo:
+    run: bash -c 'echo "Starting service..."; sleep 2; echo "Service ready"; while true; do sleep 1; done'
+    healthcheck:
+      cmd: "true"
+      interval: 1
+  healthcheck-tool-demo:
+    run: bash -c 'echo "Starting port listener..."; nc -l 12345'
+    healthcheck:
+      tool: is-port-open 12345
+      interval: 0.5
   ping-demo:
     require: [google-ping, cloudflare-ping, short-lived, auto-restarting]

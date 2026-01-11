@@ -114,6 +114,7 @@ async fn test_ensure_dependency_blocks_until_complete() {
             require: vec![],
             autorestart: false,
             timestamps: false,
+            healthcheck: None,
         },
     );
 
@@ -129,6 +130,7 @@ async fn test_ensure_dependency_blocks_until_complete() {
             require: vec!["setup".to_string()],
             autorestart: false,
             timestamps: false,
+            healthcheck: None,
         },
     );
 

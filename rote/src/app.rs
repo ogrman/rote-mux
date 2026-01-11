@@ -13,14 +13,73 @@ const STATUS_CHECK_INTERVAL_MS: u64 = 250;
 const KEYBOARD_POLL_INTERVAL_MS: u64 = 250;
 
 use crate::{
-    config::{Config, TaskAction},
+    config::{Config, Healthcheck, HealthcheckMethod, HealthcheckTool, TaskAction},
     panel::{MessageKind, Panel, PanelIndex, StatusPanel, StreamKind},
     process::TaskInstance,
     render,
     signals::is_process_exited_by_pid,
     task_manager::{TaskManager, resolve_dependencies},
+    tools,
     ui::{ProcessStatus, UiEvent},
 };
+
+/// Spawn a healthcheck task that periodically runs the healthcheck.
+/// Returns the spawned task handle.
+fn spawn_healthcheck(
+    task_name: String,
+    healthcheck: Healthcheck,
+    tx: tokio::sync::mpsc::Sender<UiEvent>,
+    mut shutdown_rx: tokio::sync::broadcast::Receiver<()>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(healthcheck.interval);
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    let passed = match &healthcheck.method {
+                        HealthcheckMethod::Cmd(cmd) => {
+                            // Run the healthcheck command via shell
+                            let result = tokio::process::Command::new("sh")
+                                .arg("-c")
+                                .arg(cmd)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .status()
+                                .await;
+                            matches!(result, Ok(status) if status.success())
+                        }
+                        HealthcheckMethod::Tool(tool) => {
+                            // Call the tool directly without spawning a process
+                            run_healthcheck_tool(tool).await.is_ok()
+                        }
+                    };
+
+                    if passed {
+                        // Healthcheck passed!
+                        let _ = tx
+                            .send(UiEvent::HealthcheckPassed {
+                                task_name: task_name.clone(),
+                            })
+                            .await;
+                        break;
+                    }
+                    // Healthcheck failed, try again after interval
+                }
+                _ = shutdown_rx.recv() => {
+                    break;
+                }
+            }
+        }
+    })
+}
+
+/// Run a built-in healthcheck tool directly.
+async fn run_healthcheck_tool(tool: &HealthcheckTool) -> anyhow::Result<()> {
+    match tool {
+        HealthcheckTool::IsPortOpen { port } => tools::is_port_open(*port).await,
+    }
+}
 fn format_timestamp(timestamps: bool) -> Option<String> {
     if timestamps {
         Some(
@@ -166,6 +225,9 @@ pub async fn run_with_input(
 
     // Initialize process slots
     let mut procs: Vec<Option<TaskInstance>> = (0..panels.len()).map(|_| None).collect();
+
+    // Track healthcheck tasks by task name
+    let mut healthcheck_tasks: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
 
     // Task manager tracks pending tasks and completed Run tasks
     let mut task_manager = TaskManager::new(tasks_list.clone(), task_to_panel.clone());
@@ -695,6 +757,11 @@ pub async fn run_with_input(
                     task.abort();
                 }
 
+                // Abort any remaining healthcheck tasks
+                for (_, task) in healthcheck_tasks.drain() {
+                    task.abort();
+                }
+
                 if enable_terminal {
                     println!();
                 }
@@ -723,6 +790,19 @@ pub async fn run_with_input(
                                 status_panel
                                     .update_entry(task_name.clone(), ProcessStatus::Running);
                                 started_any = true;
+
+                                // Spawn healthcheck task if configured
+                                if let Some(task_config) = config.tasks.get(&task_name)
+                                    && let Some(healthcheck) = &task_config.healthcheck
+                                {
+                                    let hc_task = spawn_healthcheck(
+                                        task_name.clone(),
+                                        healthcheck.clone(),
+                                        tx.clone(),
+                                        shutdown_tx.subscribe(),
+                                    );
+                                    healthcheck_tasks.insert(task_name.clone(), hc_task);
+                                }
                             }
                             Err(e) => {
                                 let timestamp = format_timestamp(panels[*panel_idx].timestamps);
@@ -740,6 +820,31 @@ pub async fn run_with_input(
                 if started_any {
                     redraw = true;
                 }
+            }
+
+            UiEvent::HealthcheckPassed { task_name } => {
+                // Mark the task as healthy
+                task_manager.mark_healthy(&task_name);
+
+                // Log the healthcheck success
+                if let Some(panel_idx) = task_manager.get_panel_index(&task_name) {
+                    let timestamp = format_timestamp(panels[*panel_idx].timestamps);
+                    panels[*panel_idx].messages.push(
+                        MessageKind::Status,
+                        "[healthcheck passed]",
+                        timestamp.as_deref(),
+                    );
+
+                    if panel_idx == active {
+                        redraw = true;
+                    }
+                }
+
+                // Remove the healthcheck task (it has completed)
+                healthcheck_tasks.remove(&task_name);
+
+                // Try to start tasks that were waiting for this healthcheck
+                let _ = tx.send(UiEvent::StartNextTask).await;
             }
 
             _ => {}
@@ -818,6 +923,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -831,6 +937,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -844,6 +951,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         // Task without action should be excluded from panels
@@ -856,6 +964,7 @@ mod tests {
                 require: vec!["first".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -952,6 +1061,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -976,6 +1086,7 @@ mod tests {
                 require: vec!["dep1".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -987,6 +1098,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -1011,6 +1123,7 @@ mod tests {
                 require: vec!["dep1".to_string(), "dep2".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1022,6 +1135,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1033,6 +1147,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -1060,6 +1175,7 @@ mod tests {
                 require: vec!["dep1".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1071,6 +1187,7 @@ mod tests {
                 require: vec!["dep2".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1082,6 +1199,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -1106,6 +1224,7 @@ mod tests {
                 require: vec!["task2".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1117,6 +1236,7 @@ mod tests {
                 require: vec!["task1".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -1164,6 +1284,7 @@ mod tests {
                 require: vec!["nonexistent".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -1188,6 +1309,7 @@ mod tests {
                 require: vec!["dep1".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1199,6 +1321,7 @@ mod tests {
                 require: vec!["dep1".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1210,6 +1333,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 
@@ -1238,6 +1362,7 @@ mod tests {
                 require: vec!["dep1".to_string(), "dep2".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1249,6 +1374,7 @@ mod tests {
                 require: vec!["base".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1260,6 +1386,7 @@ mod tests {
                 require: vec!["base".to_string()],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
         tasks.insert(
@@ -1271,6 +1398,7 @@ mod tests {
                 require: vec![],
                 autorestart: false,
                 timestamps: false,
+                healthcheck: None,
             },
         );
 

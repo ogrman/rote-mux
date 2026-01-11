@@ -10,6 +10,8 @@ pub struct TaskManager {
     pending_tasks: Vec<String>,
     /// Ensure tasks that have completed successfully.
     completed_ensure_tasks: HashSet<String>,
+    /// Run tasks with healthchecks that have passed.
+    healthy_tasks: HashSet<String>,
     /// Mapping from task name to panel index.
     task_to_panel: HashMap<String, PanelIndex>,
 }
@@ -20,6 +22,7 @@ impl TaskManager {
         Self {
             pending_tasks: tasks_to_start,
             completed_ensure_tasks: HashSet::new(),
+            healthy_tasks: HashSet::new(),
             task_to_panel,
         }
     }
@@ -29,12 +32,22 @@ impl TaskManager {
         self.completed_ensure_tasks.insert(task_name.to_string());
     }
 
+    /// Mark a Run task with a healthcheck as healthy.
+    pub fn mark_healthy(&mut self, task_name: &str) {
+        self.healthy_tasks.insert(task_name.to_string());
+    }
+
+    /// Check if a task is marked as healthy.
+    pub fn is_healthy(&self, task_name: &str) -> bool {
+        self.healthy_tasks.contains(task_name)
+    }
+
     /// Get the panel index for a task.
     pub fn get_panel_index(&self, task_name: &str) -> Option<PanelIndex> {
         self.task_to_panel.get(task_name).copied()
     }
 
-    /// Get tasks that are ready to start (all Ensure dependencies satisfied).
+    /// Get tasks that are ready to start (all blocking dependencies satisfied).
     /// Returns the tasks and removes them from the pending list.
     pub fn take_ready_tasks(&mut self, config: &Config) -> Vec<String> {
         let mut ready = Vec::new();
@@ -42,7 +55,7 @@ impl TaskManager {
 
         while i < self.pending_tasks.len() {
             let task_name = &self.pending_tasks[i];
-            if self.are_ensure_deps_satisfied(task_name, config) {
+            if self.are_deps_satisfied(task_name, config) {
                 ready.push(self.pending_tasks.remove(i));
             } else {
                 i += 1;
@@ -52,18 +65,30 @@ impl TaskManager {
         ready
     }
 
-    /// Check if all Ensure dependencies for a task have completed successfully.
-    fn are_ensure_deps_satisfied(&self, task_name: &str, config: &Config) -> bool {
+    /// Check if all blocking dependencies for a task have been satisfied.
+    /// A dependency blocks if it's an Ensure task (must complete with exit 0)
+    /// or a Run task with a healthcheck (must pass healthcheck).
+    fn are_deps_satisfied(&self, task_name: &str, config: &Config) -> bool {
         let Some(task_config) = config.tasks.get(task_name) else {
             return true;
         };
 
         task_config.require.iter().all(|dep| {
             if let Some(dep_config) = config.tasks.get(dep) {
-                if matches!(dep_config.action, Some(TaskAction::Ensure { .. })) {
-                    self.completed_ensure_tasks.contains(dep)
-                } else {
-                    true // Run dependencies don't block
+                match &dep_config.action {
+                    Some(TaskAction::Ensure { .. }) => {
+                        // Ensure tasks must complete successfully
+                        self.completed_ensure_tasks.contains(dep)
+                    }
+                    Some(TaskAction::Run { .. }) => {
+                        // Run tasks with healthchecks must become healthy
+                        if dep_config.healthcheck.is_some() {
+                            self.healthy_tasks.contains(dep)
+                        } else {
+                            true // Run tasks without healthchecks don't block
+                        }
+                    }
+                    None => true, // No action, assume satisfied
                 }
             } else {
                 true // Unknown dep, assume satisfied
@@ -145,6 +170,7 @@ mod tests {
                     require: require.into_iter().map(String::from).collect(),
                     autorestart: false,
                     timestamps: false,
+                    healthcheck: None,
                 },
             );
         }
@@ -257,5 +283,65 @@ mod tests {
         // Both should be ready since Run deps don't block
         let ready = tm.take_ready_tasks(&config);
         assert_eq!(ready.len(), 2);
+    }
+
+    #[test]
+    fn test_task_manager_run_with_healthcheck_blocks() {
+        use crate::config::{Healthcheck, HealthcheckMethod};
+        use std::time::Duration;
+
+        let mut task_map = IndexMap::new();
+        task_map.insert(
+            "server".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Run {
+                    command: CommandValue::String(Cow::Borrowed("./server")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec![],
+                autorestart: false,
+                timestamps: false,
+                healthcheck: Some(Healthcheck {
+                    method: HealthcheckMethod::Cmd("curl localhost:8080".to_string()),
+                    interval: Duration::from_secs(1),
+                }),
+            },
+        );
+        task_map.insert(
+            "client".to_string(),
+            TaskConfiguration {
+                action: Some(TaskAction::Run {
+                    command: CommandValue::String(Cow::Borrowed("./client")),
+                }),
+                cwd: None,
+                display: None,
+                require: vec!["server".to_string()],
+                autorestart: false,
+                timestamps: false,
+                healthcheck: None,
+            },
+        );
+
+        let config = Config {
+            default: None,
+            tasks: task_map,
+        };
+
+        let mut tm = TaskManager::new(
+            vec!["server".to_string(), "client".to_string()],
+            HashMap::new(),
+        );
+
+        // Only server should be ready - client is blocked by healthcheck
+        let ready = tm.take_ready_tasks(&config);
+        assert_eq!(ready, vec!["server"]);
+        assert_eq!(tm.pending_tasks, vec!["client"]);
+
+        // After marking server as healthy, client should be ready
+        tm.mark_healthy("server");
+        let ready = tm.take_ready_tasks(&config);
+        assert_eq!(ready, vec!["client"]);
+        assert!(tm.pending_tasks.is_empty());
     }
 }
