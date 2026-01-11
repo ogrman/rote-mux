@@ -78,6 +78,7 @@ fn spawn_healthcheck(
 async fn run_healthcheck_tool(tool: &HealthcheckTool) -> anyhow::Result<()> {
     match tool {
         HealthcheckTool::IsPortOpen { port } => tools::is_port_open(*port).await,
+        HealthcheckTool::HttpGet { port } => tools::http_get(*port).await,
     }
 }
 fn format_timestamp(timestamps: bool) -> Option<String> {

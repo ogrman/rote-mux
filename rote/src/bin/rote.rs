@@ -58,6 +58,11 @@ enum Tool {
         /// The port number to check
         port: u16,
     },
+    /// Make an HTTP GET request to localhost:port and check for success (2xx status)
+    HttpGet {
+        /// The port number to check
+        port: u16,
+    },
 }
 
 fn parse_duration(s: &str) -> Result<Duration, String> {
@@ -140,6 +145,7 @@ async fn run_tool(args: ToolArgs) -> anyhow::Result<()> {
     loop {
         let result = match &args.tool {
             Tool::IsPortOpen { port } => tools::is_port_open(*port).await,
+            Tool::HttpGet { port } => tools::http_get(*port).await,
         };
 
         match result {

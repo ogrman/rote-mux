@@ -15,6 +15,23 @@ pub async fn is_port_open(port: u16) -> Result<()> {
     }
 }
 
+/// Make an HTTP GET request to localhost:port and check for a successful response.
+/// Returns Ok(()) if the response status is 2xx, Err otherwise.
+pub async fn http_get(port: u16) -> Result<()> {
+    let url = format!("http://127.0.0.1:{port}/");
+    let response = reqwest::get(&url).await?;
+
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "HTTP GET {} returned status {}",
+            url,
+            response.status()
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
