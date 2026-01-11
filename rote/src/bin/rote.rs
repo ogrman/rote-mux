@@ -58,9 +58,15 @@ enum Tool {
         /// The port number to check
         port: u16,
     },
-    /// Make an HTTP GET request and check for success (2xx status).
+    /// Make an HTTP GET request. Succeeds if the request completes (any status code).
     /// Accepts either a port number (assumes http://127.0.0.1:{port}/) or a full http(s) URL.
     HttpGet {
+        /// Port number or full http(s) URL
+        target: String,
+    },
+    /// Make an HTTP GET request and check for success (2xx status).
+    /// Accepts either a port number (assumes http://127.0.0.1:{port}/) or a full http(s) URL.
+    HttpGetOk {
         /// Port number or full http(s) URL
         target: String,
     },
@@ -157,6 +163,18 @@ async fn run_tool(args: ToolArgs) -> anyhow::Result<()> {
                     format!("http://127.0.0.1:{port}/")
                 };
                 tools::http_get(&url).await
+            }
+            Tool::HttpGetOk { target } => {
+                // If it starts with http:// or https://, treat as URL; otherwise treat as port
+                let url = if target.starts_with("http://") || target.starts_with("https://") {
+                    target.clone()
+                } else {
+                    let port: u16 = target
+                        .parse()
+                        .map_err(|_| anyhow::anyhow!("invalid port number or URL: {}", target))?;
+                    format!("http://127.0.0.1:{port}/")
+                };
+                tools::http_get_ok(&url).await
             }
         };
 

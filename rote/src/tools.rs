@@ -15,10 +15,18 @@ pub async fn is_port_open(port: u16) -> Result<()> {
     }
 }
 
+/// Make an HTTP GET request.
+/// The URL should be a full http(s) URL.
+/// Returns Ok(()) if the request completes (any status code), Err if connection fails.
+pub async fn http_get(url: &str) -> Result<()> {
+    let _response = reqwest::get(url).await?;
+    Ok(())
+}
+
 /// Make an HTTP GET request and check for a successful response.
 /// The URL should be a full http(s) URL.
 /// Returns Ok(()) if the response status is 2xx, Err otherwise.
-pub async fn http_get(url: &str) -> Result<()> {
+pub async fn http_get_ok(url: &str) -> Result<()> {
     let response = reqwest::get(url).await?;
 
     if response.status().is_success() {

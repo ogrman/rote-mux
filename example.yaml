@@ -25,5 +25,10 @@ tasks:
     healthcheck:
       tool: is-port-open 12345
       interval: 0.5
+  healthcheck-http-demo:
+    run: bash -c 'echo "Waiting for google.com to be reachable..."; sleep infinity'
+    healthcheck:
+      tool: http-get-ok https://www.google.com
+      interval: 1
   ping-demo:
     require: [google-ping, cloudflare-ping, short-lived, auto-restarting]
