@@ -17,8 +17,9 @@ pub enum HealthcheckMethod {
 pub enum HealthcheckTool {
     /// Check if a port is open on localhost
     IsPortOpen { port: u16 },
-    /// Make an HTTP GET request to localhost:port and check for success (2xx status)
-    HttpGet { port: u16 },
+    /// Make an HTTP GET request and check for success (2xx status).
+    /// The URL can be a full http(s) URL or just a port number (assumes http://127.0.0.1:{port}/).
+    HttpGet { url: String },
 }
 
 /// Healthcheck configuration for a task.
@@ -91,12 +92,19 @@ fn parse_tool(s: &str) -> Result<HealthcheckTool, String> {
         }
         "http-get" => {
             if parts.len() != 2 {
-                return Err("http-get requires exactly one argument: port".to_string());
+                return Err("http-get requires exactly one argument: port or URL".to_string());
             }
-            let port: u16 = parts[1]
-                .parse()
-                .map_err(|_| format!("invalid port number: {}", parts[1]))?;
-            Ok(HealthcheckTool::HttpGet { port })
+            let arg = parts[1];
+            // If it starts with http:// or https://, treat as URL; otherwise treat as port
+            let url = if arg.starts_with("http://") || arg.starts_with("https://") {
+                arg.to_string()
+            } else {
+                let port: u16 = arg
+                    .parse()
+                    .map_err(|_| format!("invalid port number or URL: {}", arg))?;
+                format!("http://127.0.0.1:{port}/")
+            };
+            Ok(HealthcheckTool::HttpGet { url })
         }
         _ => Err(format!("unknown tool: {}", parts[0])),
     }
