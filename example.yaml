@@ -21,7 +21,8 @@ tasks:
       cmd: "true"
       interval: 1
   healthcheck-tool-demo:
-    run: bash -c 'echo "Waiting..."; sleep 5; echo "Starting port listener..."; nc -l 12345'
+    run: bash -c 'echo "Waiting..."; sleep 5; echo "Starting port listener..."; nc -l 12345; sleep 5; echo "Done"'
+    autorestart: true
     healthcheck:
       tool: is-port-open 12345
       interval: 0.5

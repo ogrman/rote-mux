@@ -30,6 +30,7 @@ pub enum UiEvent {
     Scroll(i32),
     ToggleStdout,
     ToggleStderr,
+    ToggleHealthcheck,
     Restart,
     Stop,
     Exit,
@@ -41,6 +42,15 @@ pub enum UiEvent {
     StartNextTask,
     /// Healthcheck passed for a task
     HealthcheckPassed {
+        task_name: String,
+    },
+    /// Healthcheck output line (from command healthchecks)
+    HealthcheckLine {
+        task_name: String,
+        text: String,
+    },
+    /// Healthcheck failed for a task
+    HealthcheckFailed {
         task_name: String,
     },
 }

@@ -39,15 +39,37 @@ fn spawn_healthcheck(
                 _ = interval.tick() => {
                     let passed = match &healthcheck.method {
                         HealthcheckMethod::Cmd(cmd) => {
-                            // Run the healthcheck command via shell
+                            // Run the healthcheck command via shell, capturing output
                             let result = tokio::process::Command::new("sh")
                                 .arg("-c")
                                 .arg(cmd)
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null())
-                                .status()
+                                .stdout(std::process::Stdio::piped())
+                                .stderr(std::process::Stdio::piped())
+                                .output()
                                 .await;
-                            matches!(result, Ok(status) if status.success())
+
+                            match result {
+                                Ok(output) => {
+                                    // Send stdout lines
+                                    let stdout = String::from_utf8_lossy(&output.stdout);
+                                    for line in stdout.lines() {
+                                        let _ = tx.send(UiEvent::HealthcheckLine {
+                                            task_name: task_name.clone(),
+                                            text: line.to_string(),
+                                        }).await;
+                                    }
+                                    // Send stderr lines
+                                    let stderr = String::from_utf8_lossy(&output.stderr);
+                                    for line in stderr.lines() {
+                                        let _ = tx.send(UiEvent::HealthcheckLine {
+                                            task_name: task_name.clone(),
+                                            text: line.to_string(),
+                                        }).await;
+                                    }
+                                    output.status.success()
+                                }
+                                Err(_) => false,
+                            }
                         }
                         HealthcheckMethod::Tool(tool) => {
                             // Call the tool directly without spawning a process
@@ -63,8 +85,14 @@ fn spawn_healthcheck(
                             })
                             .await;
                         break;
+                    } else {
+                        // Healthcheck failed, notify and try again after interval
+                        let _ = tx
+                            .send(UiEvent::HealthcheckFailed {
+                                task_name: task_name.clone(),
+                            })
+                            .await;
                     }
-                    // Healthcheck failed, try again after interval
                 }
                 _ = shutdown_rx.recv() => {
                     break;
@@ -277,6 +305,7 @@ pub async fn run_with_input(
                                 KeyCode::Char('t') => UiEvent::Stop,
                                 KeyCode::Char('o') => UiEvent::ToggleStdout,
                                 KeyCode::Char('e') => UiEvent::ToggleStderr,
+                                KeyCode::Char('h') => UiEvent::ToggleHealthcheck,
                                 KeyCode::Char('s') => UiEvent::SwitchToStatus,
                                 KeyCode::Char(c @ '1'..='9') => {
                                     UiEvent::SwitchPanel(PanelIndex::new((c as u8 - b'1') as usize))
@@ -411,6 +440,11 @@ pub async fn run_with_input(
                             let _ = proc.stderr_task.await;
                         }
 
+                        // Cancel any existing healthcheck for this task
+                        if let Some(hc_task) = healthcheck_tasks.remove(&task_name) {
+                            hc_task.abort();
+                        }
+
                         let p = &mut panels[*panel];
                         let was_following = p.follow;
                         let timestamp = format_timestamp(p.timestamps);
@@ -437,6 +471,20 @@ pub async fn run_with_input(
                                 procs[*panel] = Some(proc);
                                 status_panel
                                     .update_entry(task_name.clone(), ProcessStatus::Running);
+
+                                // Spawn healthcheck task if configured
+                                if let Some(healthcheck) = &task_config.healthcheck {
+                                    // Reset healthcheck status to pending
+                                    status_panel.set_has_healthcheck(&task_name);
+
+                                    let hc_task = spawn_healthcheck(
+                                        task_name.clone(),
+                                        healthcheck.clone(),
+                                        tx.clone(),
+                                        shutdown_tx.subscribe(),
+                                    );
+                                    healthcheck_tasks.insert(task_name.clone(), hc_task);
+                                }
                             }
                             Err(e) => {
                                 let timestamp = format_timestamp(panels[*panel].timestamps);
@@ -476,6 +524,13 @@ pub async fn run_with_input(
                 let p = &mut panels[*active];
                 p.show_stderr = !p.show_stderr;
                 toggle_stream_visibility(p, p.show_stderr);
+                redraw = true;
+            }
+
+            UiEvent::ToggleHealthcheck => {
+                let p = &mut panels[*active];
+                p.show_healthcheck = !p.show_healthcheck;
+                toggle_stream_visibility(p, p.show_healthcheck);
                 redraw = true;
             }
 
@@ -633,6 +688,13 @@ pub async fn run_with_input(
                 }
                 panels[*active].follow = was_following;
 
+                let task_name = panels[*active].task_name.clone();
+
+                // Cancel any existing healthcheck for this task
+                if let Some(hc_task) = healthcheck_tasks.remove(&task_name) {
+                    hc_task.abort();
+                }
+
                 let cwd = panels[*active].cwd.as_deref();
                 match TaskInstance::spawn(
                     active,
@@ -643,6 +705,22 @@ pub async fn run_with_input(
                 ) {
                     Ok(proc) => {
                         procs[*active] = Some(proc);
+
+                        // Spawn healthcheck task if configured
+                        if let Some(task_config) = config.tasks.get(&task_name)
+                            && let Some(healthcheck) = &task_config.healthcheck
+                        {
+                            // Reset healthcheck status to pending
+                            status_panel.set_has_healthcheck(&task_name);
+
+                            let hc_task = spawn_healthcheck(
+                                task_name.clone(),
+                                healthcheck.clone(),
+                                tx.clone(),
+                                shutdown_tx.subscribe(),
+                            );
+                            healthcheck_tasks.insert(task_name, hc_task);
+                        }
                     }
                     Err(e) => {
                         let timestamp = format_timestamp(panels[*active].timestamps);
@@ -838,7 +916,7 @@ pub async fn run_with_input(
                 if let Some(panel_idx) = task_manager.get_panel_index(&task_name) {
                     let timestamp = format_timestamp(panels[*panel_idx].timestamps);
                     panels[*panel_idx].messages.push(
-                        MessageKind::Status,
+                        MessageKind::Healthcheck,
                         "[healthcheck passed]",
                         timestamp.as_deref(),
                     );
@@ -852,6 +930,47 @@ pub async fn run_with_input(
 
                 // Try to start tasks that were waiting for this healthcheck
                 let _ = tx.send(UiEvent::StartNextTask).await;
+            }
+
+            UiEvent::HealthcheckLine { task_name, text } => {
+                // Send healthcheck output to the panel
+                if let Some(panel_idx) = task_manager.get_panel_index(&task_name) {
+                    let p = &mut panels[*panel_idx];
+                    let at_bottom = p.follow;
+                    let timestamp = format_timestamp(p.timestamps);
+                    p.messages
+                        .push(MessageKind::Healthcheck, &text, timestamp.as_deref());
+
+                    if at_bottom {
+                        p.scroll = p.visible_len().saturating_sub(1);
+                    }
+
+                    if panel_idx == active {
+                        redraw = true;
+                    }
+                }
+            }
+
+            UiEvent::HealthcheckFailed { task_name } => {
+                // Log the healthcheck failure
+                if let Some(panel_idx) = task_manager.get_panel_index(&task_name) {
+                    let p = &mut panels[*panel_idx];
+                    let at_bottom = p.follow;
+                    let timestamp = format_timestamp(p.timestamps);
+                    p.messages.push(
+                        MessageKind::Healthcheck,
+                        "[healthcheck failed, retrying...]",
+                        timestamp.as_deref(),
+                    );
+
+                    if at_bottom {
+                        p.scroll = p.visible_len().saturating_sub(1);
+                    }
+
+                    if panel_idx == active {
+                        redraw = true;
+                    }
+                }
             }
 
             _ => {}

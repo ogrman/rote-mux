@@ -303,10 +303,12 @@ async fn test_draw_logic_with_few_lines() {
 
     // Simulate draw function with large terminal (height > number of lines)
     let height: usize = 10;
-    let filtered_lines =
-        panel
-            .messages
-            .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
+    let filtered_lines = panel.messages.lines_filtered(
+        panel.show_stdout,
+        panel.show_stderr,
+        panel.show_status,
+        panel.show_healthcheck,
+    );
 
     let start = scroll
         .saturating_sub(height.saturating_sub(1))
@@ -376,10 +378,12 @@ async fn test_draw_logic_with_scrolling() {
 
     // Simulate draw function with small terminal (height < number of lines)
     let height: usize = 3;
-    let filtered_lines =
-        panel
-            .messages
-            .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
+    let filtered_lines = panel.messages.lines_filtered(
+        panel.show_stdout,
+        panel.show_stderr,
+        panel.show_status,
+        panel.show_healthcheck,
+    );
 
     let start = scroll
         .saturating_sub(height.saturating_sub(1))
@@ -469,10 +473,12 @@ async fn test_mixed_output_order_preservation() {
     assert_eq!(panel.visible_len(), 6);
 
     // Verify order using lines_filtered
-    let filtered_lines =
-        panel
-            .messages
-            .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
+    let filtered_lines = panel.messages.lines_filtered(
+        panel.show_stdout,
+        panel.show_stderr,
+        panel.show_status,
+        panel.show_healthcheck,
+    );
 
     // Note: Due to buffering, stderr messages may come before stdout messages
     // The important thing is that chronological order is preserved
@@ -494,10 +500,12 @@ async fn test_mixed_output_order_preservation() {
     panel.show_stderr = false;
     assert_eq!(panel.visible_len(), 3);
 
-    let stdout_only =
-        panel
-            .messages
-            .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
+    let stdout_only = panel.messages.lines_filtered(
+        panel.show_stdout,
+        panel.show_stderr,
+        panel.show_status,
+        panel.show_healthcheck,
+    );
     assert_eq!(stdout_only.len(), 3);
     assert_eq!(stdout_only[0].0, MessageKind::Stdout);
     assert_eq!(stdout_only[0].1, "stdout1");
@@ -509,10 +517,12 @@ async fn test_mixed_output_order_preservation() {
     // Toggle stderr back on - both should still be present
     panel.show_stderr = true;
     assert_eq!(panel.visible_len(), 6);
-    let both =
-        panel
-            .messages
-            .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
+    let both = panel.messages.lines_filtered(
+        panel.show_stdout,
+        panel.show_stderr,
+        panel.show_status,
+        panel.show_healthcheck,
+    );
     assert_eq!(both.len(), 6);
 
     // Assert that stdout1 comes before stdout2 and stdout3, and similarly for stderr

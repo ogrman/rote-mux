@@ -46,6 +46,7 @@ pub enum MessageKind {
     Stdout,
     Stderr,
     Status,
+    Healthcheck,
 }
 
 pub struct MessageBuf {
@@ -68,6 +69,7 @@ impl MessageBuf {
             MessageKind::Stdout => b'o',
             MessageKind::Stderr => b'e',
             MessageKind::Status => b's',
+            MessageKind::Healthcheck => b'h',
         };
         let content = match timestamp {
             Some(ts) => format!("{ts} {line}"),
@@ -89,6 +91,7 @@ impl MessageBuf {
         show_stdout: bool,
         show_stderr: bool,
         show_status: bool,
+        show_healthcheck: bool,
     ) -> Vec<(MessageKind, String)> {
         let mut result = Vec::new();
         for line in self.rope.lines() {
@@ -103,12 +106,14 @@ impl MessageBuf {
                     'o' => MessageKind::Stdout,
                     'e' => MessageKind::Stderr,
                     's' => MessageKind::Status,
+                    'h' => MessageKind::Healthcheck,
                     _ => continue,
                 };
                 let should_include = match kind {
                     MessageKind::Stdout => show_stdout,
                     MessageKind::Stderr => show_stderr,
                     MessageKind::Status => show_status,
+                    MessageKind::Healthcheck => show_healthcheck,
                 };
                 if should_include {
                     result.push((kind, content.trim_end_matches('\n').to_string()));
@@ -177,6 +182,7 @@ pub struct Panel {
     pub show_stdout: bool,
     pub show_stderr: bool,
     pub show_status: bool,
+    pub show_healthcheck: bool,
     pub timestamps: bool,
     pub process_status: Option<crate::ui::ProcessStatus>,
 }
@@ -201,6 +207,7 @@ impl Panel {
             show_stdout,
             show_stderr,
             show_status: true,
+            show_healthcheck: true,
             timestamps,
             process_status: None,
         }
@@ -213,14 +220,24 @@ impl Panel {
 
     pub fn visible_len(&self) -> usize {
         self.messages
-            .lines_filtered(self.show_stdout, self.show_stderr, self.show_status)
+            .lines_filtered(
+                self.show_stdout,
+                self.show_stderr,
+                self.show_status,
+                self.show_healthcheck,
+            )
             .len()
     }
 
     /// Compute total visual lines when wrapped to the given width.
     pub fn total_visual_lines(&self, width: usize) -> usize {
         self.messages
-            .lines_filtered(self.show_stdout, self.show_stderr, self.show_status)
+            .lines_filtered(
+                self.show_stdout,
+                self.show_stderr,
+                self.show_status,
+                self.show_healthcheck,
+            )
             .iter()
             .map(|(_, line)| wrap_line(line, width).len())
             .sum()
@@ -402,15 +419,18 @@ mod tests {
         buf.push(MessageKind::Stdout, "stdout line", None);
         buf.push(MessageKind::Stderr, "stderr line", None);
         buf.push(MessageKind::Status, "status line", None);
+        buf.push(MessageKind::Healthcheck, "healthcheck line", None);
 
-        let lines = buf.lines_filtered(true, true, true);
-        assert_eq!(lines.len(), 3);
+        let lines = buf.lines_filtered(true, true, true, true);
+        assert_eq!(lines.len(), 4);
         assert_eq!(lines[0].0, MessageKind::Stdout);
         assert_eq!(lines[0].1, "stdout line");
         assert_eq!(lines[1].0, MessageKind::Stderr);
         assert_eq!(lines[1].1, "stderr line");
         assert_eq!(lines[2].0, MessageKind::Status);
         assert_eq!(lines[2].1, "status line");
+        assert_eq!(lines[3].0, MessageKind::Healthcheck);
+        assert_eq!(lines[3].1, "healthcheck line");
     }
 
     #[test]
@@ -420,7 +440,7 @@ mod tests {
         buf.push(MessageKind::Stderr, "stderr line", None);
         buf.push(MessageKind::Status, "status line", None);
 
-        let lines = buf.lines_filtered(true, false, false);
+        let lines = buf.lines_filtered(true, false, false, false);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].0, MessageKind::Stdout);
         assert_eq!(lines[0].1, "stdout line");
@@ -433,7 +453,7 @@ mod tests {
         buf.push(MessageKind::Stderr, "stderr line", None);
         buf.push(MessageKind::Status, "status line", None);
 
-        let lines = buf.lines_filtered(false, true, false);
+        let lines = buf.lines_filtered(false, true, false, false);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].0, MessageKind::Stderr);
         assert_eq!(lines[0].1, "stderr line");
@@ -446,10 +466,24 @@ mod tests {
         buf.push(MessageKind::Stderr, "stderr line", None);
         buf.push(MessageKind::Status, "status line", None);
 
-        let lines = buf.lines_filtered(false, false, true);
+        let lines = buf.lines_filtered(false, false, true, false);
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].0, MessageKind::Status);
         assert_eq!(lines[0].1, "status line");
+    }
+
+    #[test]
+    fn test_message_buf_lines_filtered_healthcheck_only() {
+        let mut buf = MessageBuf::new();
+        buf.push(MessageKind::Stdout, "stdout line", None);
+        buf.push(MessageKind::Stderr, "stderr line", None);
+        buf.push(MessageKind::Status, "status line", None);
+        buf.push(MessageKind::Healthcheck, "healthcheck line", None);
+
+        let lines = buf.lines_filtered(false, false, false, true);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].0, MessageKind::Healthcheck);
+        assert_eq!(lines[0].1, "healthcheck line");
     }
 
     #[test]
@@ -471,6 +505,7 @@ mod tests {
         assert!(panel.follow);
         assert!(panel.show_stdout);
         assert!(panel.show_stderr);
+        assert!(panel.show_healthcheck);
         assert!(!panel.timestamps);
         assert_eq!(panel.process_status, None);
     }
@@ -490,6 +525,7 @@ mod tests {
         assert_eq!(panel.cwd, None);
         assert!(!panel.show_stdout);
         assert!(!panel.show_stderr);
+        assert!(panel.show_healthcheck);
         assert!(!panel.timestamps);
     }
 

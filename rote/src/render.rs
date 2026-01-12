@@ -275,10 +275,12 @@ pub fn draw(
         // Inner width for text (subtract 2 for borders)
         let inner_width = content_area.width.saturating_sub(2) as usize;
 
-        let filtered_lines =
-            panel
-                .messages
-                .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
+        let filtered_lines = panel.messages.lines_filtered(
+            panel.show_stdout,
+            panel.show_stderr,
+            panel.show_status,
+            panel.show_healthcheck,
+        );
 
         let total_lines = filtered_lines.len();
 
@@ -399,6 +401,7 @@ pub fn draw(
             "t    stop",
             "o    toggle stdout",
             "e    toggle stderr",
+            "h    toggle healthcheck",
         ]
         .join("\n");
 
