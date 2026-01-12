@@ -351,14 +351,31 @@ pub fn draw(
             .map(get_health_status)
             .unwrap_or_else(get_default_health_status);
 
-        let title = Line::from(vec![
-            Span::styled(format!("{} ", icon), Style::default().fg(color)),
-            Span::raw(format!(
+        // Check if this task has a healthcheck configured
+        let has_healthcheck = status_panel
+            .get_entry(&panel.task_name)
+            .is_some_and(|e| e.healthcheck_passed.is_some());
+
+        let title_text = if has_healthcheck {
+            format!(
+                "{} [stdout: {}, stderr: {}, health: {}]",
+                panel.title,
+                if panel.show_stdout { "on" } else { "off" },
+                if panel.show_stderr { "on" } else { "off" },
+                if panel.show_healthcheck { "on" } else { "off" },
+            )
+        } else {
+            format!(
                 "{} [stdout: {}, stderr: {}]",
                 panel.title,
                 if panel.show_stdout { "on" } else { "off" },
                 if panel.show_stderr { "on" } else { "off" },
-            )),
+            )
+        };
+
+        let title = Line::from(vec![
+            Span::styled(format!("{} ", icon), Style::default().fg(color)),
+            Span::raw(title_text),
         ]);
 
         let widget =
@@ -390,20 +407,23 @@ pub fn draw(
         let status_widget = render_task_status(status_panel);
         f.render_widget(status_widget, status_area);
 
-        let help_text = [
+        let mut help_lines = vec![
             "1-9  view process",
             "←/→  navigate",
             "↑/↓  scroll",
-            "PgUp/PgDn scroll fast",
+            "PgUp scroll faster",
+            "PgDn scroll faster",
             "s    status",
             "q    quit",
             "r    restart",
             "t    stop",
             "o    toggle stdout",
             "e    toggle stderr",
-            "h    toggle healthcheck",
-        ]
-        .join("\n");
+        ];
+        if has_healthcheck {
+            help_lines.push("h    toggle health");
+        }
+        let help_text = help_lines.join("\n");
 
         let help_widget = Paragraph::new(help_text)
             .alignment(Alignment::Left)
