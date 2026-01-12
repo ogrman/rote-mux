@@ -13,9 +13,39 @@ use std::io;
 
 use crate::{
     config::TaskAction,
-    panel::{Panel, StatusPanel, WRAP_INDICATOR, wrap_line},
+    panel::{Panel, StatusEntry, StatusPanel, WRAP_INDICATOR, wrap_line},
     ui::ProcessStatus,
 };
+
+/// Get the health status (icon, text, color) for a task based on its StatusEntry.
+fn get_health_status(entry: &StatusEntry) -> (&'static str, &'static str, Color) {
+    match (&entry.action_type, entry.status) {
+        (_, ProcessStatus::NotStarted) => ("○", "Not started", Color::Gray),
+        (Some(TaskAction::Ensure { .. }), ProcessStatus::Exited) => {
+            if entry.exit_code == Some(0) {
+                ("✓", "Completed", Color::Green)
+            } else {
+                ("✗", "Failed", Color::Red)
+            }
+        }
+        (Some(TaskAction::Run { .. }), ProcessStatus::Running) => {
+            // Check if healthcheck is configured and pending
+            match entry.healthcheck_passed {
+                Some(false) => ("⏳", "Starting", Color::Yellow),
+                Some(true) => ("✓", "Healthy", Color::Green),
+                None => ("●", "Running", Color::Green),
+            }
+        }
+        (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => ("✗", "Exited", Color::Red),
+        (_, ProcessStatus::Running) => ("●", "Running", Color::Green),
+        (_, ProcessStatus::Exited) => ("○", "Exited", Color::Gray),
+    }
+}
+
+/// Get the default health status for when there's no entry.
+fn get_default_health_status() -> (&'static str, &'static str, Color) {
+    ("○", "Not started", Color::Gray)
+}
 
 pub fn draw_shutdown(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
@@ -125,24 +155,8 @@ pub fn draw_status(
             .iter()
             .enumerate()
             .map(|(i, entry)| {
-                let (status_text, status_color) = match (&entry.action_type, entry.status) {
-                    (_, ProcessStatus::NotStarted) => ("○ Not started", Color::Gray),
-                    (Some(TaskAction::Ensure { .. }), ProcessStatus::Exited) => {
-                        if entry.exit_code == Some(0) {
-                            ("✓ Completed", Color::Green)
-                        } else {
-                            ("✗ Failed", Color::Red)
-                        }
-                    }
-                    (Some(TaskAction::Run { .. }), ProcessStatus::Running) => {
-                        ("● Running", Color::Green)
-                    }
-                    (Some(TaskAction::Run { .. }), ProcessStatus::Exited) => {
-                        ("✗ Exited", Color::Red)
-                    }
-                    (_, ProcessStatus::Running) => ("● Running", Color::Green),
-                    (_, ProcessStatus::Exited) => ("✓ Exited", Color::Gray),
-                };
+                let (icon, text, status_color) = get_health_status(entry);
+                let status_text = format!("{} {}", icon, text);
 
                 let (exit_code_text, exit_code_color) = match entry.exit_code {
                     Some(code) => {
@@ -261,10 +275,12 @@ pub fn draw(
         // Inner width for text (subtract 2 for borders)
         let inner_width = content_area.width.saturating_sub(2) as usize;
 
-        let filtered_lines =
-            panel
-                .messages
-                .lines_filtered(panel.show_stdout, panel.show_stderr, panel.show_status);
+        let filtered_lines = panel.messages.lines_filtered(
+            panel.show_stdout,
+            panel.show_stderr,
+            panel.show_status,
+            panel.show_healthcheck,
+        );
 
         let total_lines = filtered_lines.len();
 
@@ -329,12 +345,38 @@ pub fn draw(
 
         let text = visual_lines.join("\n");
 
-        let title = format!(
-            "{} [stdout: {}, stderr: {}]",
-            panel.title,
-            if panel.show_stdout { "on" } else { "off" },
-            if panel.show_stderr { "on" } else { "off" },
-        );
+        // Get health status icon and color for this panel's task
+        let (icon, _, color) = status_panel
+            .get_entry(&panel.task_name)
+            .map(get_health_status)
+            .unwrap_or_else(get_default_health_status);
+
+        // Check if this task has a healthcheck configured
+        let has_healthcheck = status_panel
+            .get_entry(&panel.task_name)
+            .is_some_and(|e| e.healthcheck_passed.is_some());
+
+        let title_text = if has_healthcheck {
+            format!(
+                "{} [stdout: {}, stderr: {}, health: {}]",
+                panel.title,
+                if panel.show_stdout { "on" } else { "off" },
+                if panel.show_stderr { "on" } else { "off" },
+                if panel.show_healthcheck { "on" } else { "off" },
+            )
+        } else {
+            format!(
+                "{} [stdout: {}, stderr: {}]",
+                panel.title,
+                if panel.show_stdout { "on" } else { "off" },
+                if panel.show_stderr { "on" } else { "off" },
+            )
+        };
+
+        let title = Line::from(vec![
+            Span::styled(format!("{} ", icon), Style::default().fg(color)),
+            Span::raw(title_text),
+        ]);
 
         let widget =
             Paragraph::new(text).block(Block::default().title(title).borders(Borders::ALL));
@@ -365,19 +407,23 @@ pub fn draw(
         let status_widget = render_task_status(status_panel);
         f.render_widget(status_widget, status_area);
 
-        let help_text = [
+        let mut help_lines = vec![
             "1-9  view process",
             "←/→  navigate",
             "↑/↓  scroll",
-            "PgUp/PgDn scroll fast",
+            "PgUp scroll faster",
+            "PgDn scroll faster",
             "s    status",
             "q    quit",
             "r    restart",
             "t    stop",
             "o    toggle stdout",
             "e    toggle stderr",
-        ]
-        .join("\n");
+        ];
+        if has_healthcheck {
+            help_lines.push("h    toggle health");
+        }
+        let help_text = help_lines.join("\n");
 
         let help_widget = Paragraph::new(help_text)
             .alignment(Alignment::Left)

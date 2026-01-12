@@ -84,6 +84,7 @@ Each task can have the following properties:
 - `require` (optional): List of tasks that must be started before this one
 - `autorestart` (optional): If true, automatically restart the task when it exits (default: false)
 - `timestamps` (optional): If true, show timestamps for log messages (default: false)
+- `healthcheck` (optional): Healthcheck configuration for the task (see below)
 
 ### Actions: `run` vs `ensure`
 
@@ -91,6 +92,38 @@ Each task can have the following properties:
 - `ensure`: For one-time setup tasks (migrations, installations). These run to completion before dependent tasks start. They do not create a panel.
 
 These are mutually exclusive - a task can only have one or the other.
+
+### Healthchecks
+
+Tasks with a `run` action can optionally specify a healthcheck. When a healthcheck is configured, dependent tasks will wait for the healthcheck to pass before starting (similar to how `ensure` tasks block dependents until complete).
+
+```yaml
+tasks:
+  postgres:
+    run: docker run --rm -p 5432:5432 postgres
+    healthcheck:
+      tool: is-port-open 5432
+      interval: 1
+
+  api:
+    run: ./server
+    require: [postgres]  # Won't start until postgres healthcheck passes
+```
+
+Healthcheck fields:
+- `cmd`: A shell command to run. Healthcheck passes when it exits with code 0.
+- `tool`: A built-in tool to run directly (without spawning a process). See below for available tools.
+- `interval`: How often to run the healthcheck, in seconds (supports decimals like `0.5`).
+
+You must specify either `cmd` or `tool`, but not both.
+
+#### Built-in Healthcheck Tools
+
+- `is-port-open <port>`: Check if a TCP port is open on localhost.
+- `http-get <port or URL>`: Perform an HTTP GET request. If given a port number, hits `http://127.0.0.1:{port}/`. If given a full URL (starting with `http://` or `https://`), uses that URL directly. Passes if the server responds (any status code).
+- `http-get-ok <port or URL>`: Same as `http-get`, but only passes if the server returns a 2xx status code.
+
+Using `tool` is equivalent to `cmd: "rote tool ..."` but more efficient since it doesn't spawn a new process for each healthcheck.
 
 ### Example: Full-Stack Application
 
@@ -102,36 +135,42 @@ tasks:
     cwd: backend
     ensure: bash -c '[ -f .env ] || cp env_template .env'
 
-  # Install dependencies:
+  # Install dependencies
   frontend-install:
     cwd: frontend
     ensure: npm install
 
-  # Database
+  # Database with healthcheck - migrations wait until postgres is accepting connections
   postgres:
     run: docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=dev postgres
     display: [stderr]
+    healthcheck:
+      tool: is-port-open 5432
+      interval: 0.5
 
-  # Run migrations after DB is ready
+  # Run migrations after DB is ready (healthcheck must pass first)
   migrate:
-    ensure: run-migrations.sh
-    require: [postgres, install]
+    ensure: ./run-migrations.sh
+    require: [postgres]
 
-  # Backend server
+  # Backend server with healthcheck - frontend waits until API is responding
   api:
     cwd: backend
     run: cargo run --bin api
     require: [migrate, init-config]
+    healthcheck:
+      tool: http-get 8080
+      interval: 1
 
-  # Frontend dev server
+  # Frontend dev server - starts after API is healthy
   web:
     cwd: frontend
-    run: npm run http-server
-    require: [install]
+    run: npm run dev
+    require: [frontend-install, api]
 
   # Development target
   dev:
-    require: [api, web]
+    require: [web]
 ```
 
 ### Display Streams

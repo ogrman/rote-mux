@@ -1,6 +1,133 @@
 use indexmap::IndexMap;
 use serde::Deserialize;
 use std::borrow::Cow;
+use std::time::Duration;
+
+/// Represents a healthcheck method - either a shell command or a built-in tool.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthcheckMethod {
+    /// A shell command to run (via sh -c)
+    Cmd(String),
+    /// A built-in tool to call directly (without spawning a process)
+    Tool(HealthcheckTool),
+}
+
+/// Built-in healthcheck tools that can be called directly without spawning a process.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HealthcheckTool {
+    /// Check if a port is open on localhost
+    IsPortOpen { port: u16 },
+    /// Make an HTTP GET request. Succeeds if the request completes (any status code).
+    /// The URL can be a full http(s) URL or just a port number (assumes http://127.0.0.1:{port}/).
+    HttpGet { url: String },
+    /// Make an HTTP GET request and check for success (2xx status).
+    /// The URL can be a full http(s) URL or just a port number (assumes http://127.0.0.1:{port}/).
+    HttpGetOk { url: String },
+}
+
+/// Healthcheck configuration for a task.
+/// When specified, a task with `run` action is not considered healthy
+/// until the healthcheck command exits with code 0.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Healthcheck {
+    /// The method to use for the healthcheck (either cmd or tool).
+    pub method: HealthcheckMethod,
+    /// How often to run the healthcheck (in seconds).
+    pub interval: Duration,
+}
+
+impl<'de> serde::Deserialize<'de> for Healthcheck {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawHealthcheck {
+            cmd: Option<String>,
+            tool: Option<String>,
+            #[serde(deserialize_with = "deserialize_duration_secs")]
+            interval: Duration,
+        }
+
+        let raw = RawHealthcheck::deserialize(deserializer)?;
+
+        let method = match (raw.cmd, raw.tool) {
+            (Some(cmd), None) => HealthcheckMethod::Cmd(cmd),
+            (None, Some(tool_str)) => {
+                let tool = parse_tool(&tool_str).map_err(serde::de::Error::custom)?;
+                HealthcheckMethod::Tool(tool)
+            }
+            (Some(_), Some(_)) => {
+                return Err(serde::de::Error::custom(
+                    "healthcheck cannot have both 'cmd' and 'tool' specified",
+                ));
+            }
+            (None, None) => {
+                return Err(serde::de::Error::custom(
+                    "healthcheck must have either 'cmd' or 'tool' specified",
+                ));
+            }
+        };
+
+        Ok(Healthcheck {
+            method,
+            interval: raw.interval,
+        })
+    }
+}
+
+/// Parse a tool string like "is-port-open 5432" into a HealthcheckTool.
+fn parse_tool(s: &str) -> Result<HealthcheckTool, String> {
+    let parts: Vec<&str> = s.split_whitespace().collect();
+    if parts.is_empty() {
+        return Err("empty tool specification".to_string());
+    }
+
+    match parts[0] {
+        "is-port-open" => {
+            if parts.len() != 2 {
+                return Err("is-port-open requires exactly one argument: port".to_string());
+            }
+            let port: u16 = parts[1]
+                .parse()
+                .map_err(|_| format!("invalid port number: {}", parts[1]))?;
+            Ok(HealthcheckTool::IsPortOpen { port })
+        }
+        "http-get" | "http-get-ok" => {
+            let tool_name = parts[0];
+            if parts.len() != 2 {
+                return Err(format!(
+                    "{} requires exactly one argument: port or URL",
+                    tool_name
+                ));
+            }
+            let arg = parts[1];
+            // If it starts with http:// or https://, treat as URL; otherwise treat as port
+            let url = if arg.starts_with("http://") || arg.starts_with("https://") {
+                arg.to_string()
+            } else {
+                let port: u16 = arg
+                    .parse()
+                    .map_err(|_| format!("invalid port number or URL: {}", arg))?;
+                format!("http://127.0.0.1:{port}/")
+            };
+            if tool_name == "http-get-ok" {
+                Ok(HealthcheckTool::HttpGetOk { url })
+            } else {
+                Ok(HealthcheckTool::HttpGet { url })
+            }
+        }
+        _ => Err(format!("unknown tool: {}", parts[0])),
+    }
+}
+
+fn deserialize_duration_secs<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let secs: f64 = Deserialize::deserialize(deserializer)?;
+    Ok(Duration::from_secs_f64(secs))
+}
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
@@ -32,6 +159,10 @@ pub struct TaskConfiguration {
     /// Whether to show timestamps for log messages.
     #[serde(default)]
     pub timestamps: bool,
+    /// Optional healthcheck configuration. When specified, dependents will
+    /// wait for this task's healthcheck to pass before starting.
+    #[serde(default)]
+    pub healthcheck: Option<Healthcheck>,
 }
 
 /// Represents the action to be performed for a task.
@@ -309,5 +440,269 @@ tasks:
         if let Some(TaskAction::Ensure { command }) = &task.action {
             assert_eq!(command.as_command(), Cow::Borrowed("false"));
         }
+    }
+
+    #[test]
+    fn test_healthcheck_parsing_cmd() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      cmd: "rote tool is-port-open 8080"
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        assert!(task.healthcheck.is_some());
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Cmd("rote tool is-port-open 8080".to_string())
+        );
+        assert_eq!(hc.interval, std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_healthcheck_parsing_tool() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: is-port-open 8080
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        assert!(task.healthcheck.is_some());
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::IsPortOpen { port: 8080 })
+        );
+        assert_eq!(hc.interval, std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_healthcheck_parsing_fractional_interval() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      cmd: curl http://localhost:8080/health
+      interval: 0.5
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(hc.interval, std::time::Duration::from_millis(500));
+    }
+
+    #[test]
+    fn test_healthcheck_optional() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        assert!(task.healthcheck.is_none());
+    }
+
+    #[test]
+    fn test_healthcheck_both_cmd_and_tool_error() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      cmd: "true"
+      tool: is-port-open 8080
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("both"));
+    }
+
+    #[test]
+    fn test_healthcheck_neither_cmd_nor_tool_error() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("either"));
+    }
+
+    #[test]
+    fn test_healthcheck_invalid_tool() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: unknown-tool 123
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("unknown tool"));
+    }
+
+    #[test]
+    fn test_healthcheck_tool_invalid_port() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: is-port-open not-a-number
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid port"));
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_with_url() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get https://example.com/health
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGet {
+                url: "https://example.com/health".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_with_port() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get 8080
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGet {
+                url: "http://127.0.0.1:8080/".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_ok_with_url() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get-ok http://localhost:3000/ready
+      interval: 0.5
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGetOk {
+                url: "http://localhost:3000/ready".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_ok_with_port() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get-ok 9000
+      interval: 1
+"#;
+        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let task = &config.tasks["task"];
+        let hc = task.healthcheck.as_ref().unwrap();
+        assert_eq!(
+            hc.method,
+            HealthcheckMethod::Tool(HealthcheckTool::HttpGetOk {
+                url: "http://127.0.0.1:9000/".to_string()
+            })
+        );
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_invalid_arg() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get not-a-port-or-url
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("invalid port number or URL"));
+    }
+
+    #[test]
+    fn test_healthcheck_tool_http_get_missing_arg() {
+        let yaml = r#"
+default: task
+tasks:
+  task:
+    run: ./server
+    healthcheck:
+      tool: http-get
+      interval: 1
+"#;
+        let result: Result<Config, _> = serde_yaml::from_str(yaml);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("requires exactly one argument"));
     }
 }

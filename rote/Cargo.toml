@@ -1,6 +1,6 @@
 [package]
 name = "rote-mux"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "A terminal multiplexer for monitoring and managing multiple processes"
 license = "MIT"
@@ -26,3 +26,4 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_yaml = "0.9.34"
 shell-words = "1.1.1"
 unicode-width = "0.1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
